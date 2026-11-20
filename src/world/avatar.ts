@@ -1,8 +1,11 @@
 import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import type { Physics, PhysObj } from './physics';
-import { mat, shadowed } from './room';
-import { fabric } from './textures';
+import { shadowed } from './room';
+import { buildAvatarModel, type AvatarRig } from './avatarModel';
+
+const tmpV = new THREE.Vector3();
+const tmpE = new THREE.Euler();
 
 /**
  * Player avatar: a dynamic capsule with locked rotation while walking.
@@ -13,9 +16,16 @@ export class Avatar {
   readonly body: RAPIER.RigidBody;
   readonly obj: PhysObj;
   readonly materials: THREE.MeshStandardMaterial[] = [];
-  private legs: THREE.Object3D[] = [];
-  private arms: THREE.Object3D[] = [];
+  legs: THREE.Object3D[] = [];
+  arms: THREE.Object3D[] = [];
   private walkT = 0;
+  private readonly rig: AvatarRig;
+  private t = 0;
+  private blinkT = 2;
+  private lookYaw = 0;
+  private lookPitch = 0;
+  /** World point the head glances at (usually the camera). */
+  lookTarget: THREE.Vector3 | null = null;
   ragdoll = 0;
   airTime = 0;
   facing = 0;
@@ -26,54 +36,12 @@ export class Avatar {
     spawn: THREE.Vector3,
   ) {
     const R = phys.R;
-    const hoodie = mat('#ffffff', 0.9, 0, { map: fabric('#4a6fa5') });
-    const pants = mat('#ffffff', 0.9, 0, { map: fabric('#2d2d38') });
-    const skin = mat('#e8b896', 0.55);
-    const shoe = mat('#f2f2f2', 0.5);
-    this.materials.push(hoodie, pants, skin, shoe);
-    skin.userData.noSkin = true;
-    shoe.userData.noSkin = true;
-    pants.userData.noSkin = true;
-    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 0.36, 8, 16), hoodie);
-    torso.position.y = 0.2;
-    torso.scale.set(1, 1, 0.75);
-    this.group.add(torso);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 24, 18), skin);
-    head.position.y = 0.66;
-    this.group.add(head);
-    const hairM = mat('#3b2a1e', 0.8);
-    hairM.userData.noSkin = true;
-    const hair = new THREE.Mesh(new THREE.SphereGeometry(0.155, 20, 14, 0, Math.PI * 2, 0, Math.PI / 2.2), hairM);
-    hair.position.y = 0.68;
-    this.group.add(hair);
-    for (const side of [-1, 1]) {
-      const eyeM = mat('#111', 0.2);
-      eyeM.userData.noSkin = true;
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.018, 10, 8), eyeM);
-      eye.position.set(side * 0.055, 0.68, -0.135);
-      this.group.add(eye);
-      const legPivot = new THREE.Group();
-      legPivot.position.set(side * 0.1, -0.12, 0);
-      const leg = new THREE.Mesh(new THREE.CapsuleGeometry(0.075, 0.42, 6, 12), pants);
-      leg.position.y = -0.28;
-      legPivot.add(leg);
-      const foot = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.07, 0.2), shoe);
-      foot.position.set(0, -0.55, -0.04);
-      legPivot.add(foot);
-      this.group.add(legPivot);
-      this.legs.push(legPivot);
-      const armPivot = new THREE.Group();
-      armPivot.position.set(side * 0.27, 0.4, 0);
-      const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.06, 0.38, 6, 12), hoodie);
-      arm.position.y = -0.22;
-      armPivot.add(arm);
-      const hand = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 10), skin);
-      hand.position.y = -0.46;
-      armPivot.add(hand);
-      armPivot.rotation.z = side * 0.12;
-      this.group.add(armPivot);
-      this.arms.push(armPivot);
-    }
+    const rig = buildAvatarModel();
+    this.rig = rig;
+    this.materials.push(...rig.materials);
+    this.group.add(rig.root);
+    this.legs = rig.hips;
+    this.arms = rig.shoulders;
     scene.add(shadowed(this.group));
     this.body = phys.createBody({ pos: spawn, linearDamping: 0.2, angularDamping: 1 });
     this.body.lockRotations(true, true);
@@ -135,13 +103,51 @@ export class Avatar {
 
   /** Physics sync resets the mesh rotation each step; re-apply the walking facing direction. */
   postSync(): void {
-    if (this.ragdoll <= 0) this.group.quaternion.setFromEuler(new THREE.Euler(0, this.facing + Math.PI, 0));
+    if (this.ragdoll <= 0) this.group.quaternion.setFromEuler(tmpE.set(0, this.facing + Math.PI, 0));
   }
 
   private animate(dt: number, speed: number): void {
+    const rig = this.rig;
+    this.t += dt;
     this.walkT += dt * speed * 4;
     const swing = Math.min(1, speed / 2) * 0.7;
-    this.legs.forEach((l, i) => (l.rotation.x = Math.sin(this.walkT + i * Math.PI) * swing));
-    this.arms.forEach((a, i) => (a.rotation.x = Math.sin(this.walkT + i * Math.PI + Math.PI) * swing * 0.8));
+    const flail = this.ragdoll > 0;
+    for (let i = 0; i < 2; i++) {
+      const ph = this.walkT + i * Math.PI;
+      const hip = rig.hips[i]!;
+      hip.rotation.x = Math.sin(ph) * swing;
+      // knee bends while the leg swings forward, straightens on contact
+      rig.knees[i]!.rotation.x = -(0.05 + Math.max(0, Math.cos(ph)) * 1.1) * swing - (flail ? 0.6 : 0);
+      const sh = rig.shoulders[i]!;
+      sh.rotation.x = flail ? Math.sin(this.t * 14 + i) * 1.2 : Math.sin(ph + Math.PI) * swing * 0.8;
+      sh.rotation.z = (i ? 1 : -1) * (flail ? 1.1 + Math.sin(this.t * 11 + i * 2) * 0.5 : 0.1 + Math.sin(this.t * 1.4) * 0.01);
+      rig.elbows[i]!.rotation.x = 0.18 + swing * 0.45 + (flail ? 0.8 : 0);
+    }
+    // idle breathing
+    const breath = Math.sin(this.t * 2.1);
+    rig.torso.scale.set(1 + breath * 0.008, 1 + breath * 0.01, 1 + breath * 0.012);
+    rig.shoulders[0]!.position.y = rig.shoulders[1]!.position.y = 0.43 + breath * 0.004;
+    rig.headPivot.position.y = 0.54 + breath * 0.004 - Math.abs(Math.sin(this.walkT)) * 0.012 * swing;
+    // blinking
+    this.blinkT -= dt;
+    if (this.blinkT < -0.12) this.blinkT = 2 + Math.random() * 3.5;
+    const lid = this.blinkT < 0 ? 0.1 : 1;
+    for (const e of rig.eyes) e.scale.y = lid;
+    // glance at the camera when it is in front of us
+    let yaw = 0;
+    let pitch = 0;
+    if (this.lookTarget && !flail) {
+      this.group.updateWorldMatrix(true, false);
+      const l = this.group.worldToLocal(tmpV.copy(this.lookTarget));
+      const a = Math.atan2(-l.x, -l.z);
+      if (Math.abs(a) < 1.9) {
+        yaw = THREE.MathUtils.clamp(a, -0.7, 0.7);
+        pitch = THREE.MathUtils.clamp(Math.atan2(l.y - 0.7, Math.hypot(l.x, l.z)), -0.3, 0.35);
+      }
+    }
+    const k = 1 - Math.pow(0.03, dt);
+    this.lookYaw += (yaw - this.lookYaw) * k;
+    this.lookPitch += (pitch - this.lookPitch) * k;
+    rig.headPivot.rotation.set(this.lookPitch * 0.7, this.lookYaw, 0, 'YXZ');
   }
 }

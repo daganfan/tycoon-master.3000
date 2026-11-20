@@ -154,6 +154,8 @@ export interface Settings {
   volume: number;
   wallpaper: number;
   reducedMotion: boolean;
+  /** Graphics preset: auto | low | medium | high | ultra. */
+  quality: 'auto' | 'low' | 'medium' | 'high' | 'ultra';
 }
 
 /** Saved pose of a physical prop: current position/rotation and its "home" (where it was last placed). */

@@ -201,7 +201,7 @@
   }
   .hint {
     position: fixed;
-    bottom: 18px;
+    bottom: 70px;
     left: 50%;
     transform: translateX(-50%);
     color: #fff;

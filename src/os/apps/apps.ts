@@ -326,6 +326,9 @@ const settings: OsApp = {
     row('Physics chaos (comfort)', `${Math.round(st.comfort * 100)}%`, () => (st.comfort = clamp(st.comfort - 0.1)), () => (st.comfort = clamp(st.comfort + 0.1)));
     row('Volume', `${Math.round(st.volume * 100)}%`, () => (st.volume = clamp(st.volume - 0.1)), () => (st.volume = clamp(st.volume + 0.1)));
     row('Reduced motion', st.reducedMotion ? 'On' : 'Off', () => (st.reducedMotion = false), () => (st.reducedMotion = true));
+    const Q = ['auto', 'low', 'medium', 'high', 'ultra'] as const;
+    const qi = Math.max(0, Q.indexOf(st.quality));
+    row('Graphics quality', st.quality[0]!.toUpperCase() + st.quality.slice(1), () => (st.quality = Q[(qi + 4) % 5]!), () => (st.quality = Q[(qi + 1) % 5]!));
     ui.text(`OS: ${ui.theme.name} · ${os.maxWindows()} window${os.maxWindows() > 1 ? 's' : ''} at once`, r.x, y + 16, { size: 14, color: ui.theme.muted });
     y += 46;
     const [a, b] = splitH({ x: r.x, y, w: r.w, h: 44 }, r.w / 2 - 5, 10);
