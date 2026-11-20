@@ -72,7 +72,7 @@ function hash(s: string): number {
   return h >>> 0;
 }
 
-function free(phys: Physics, p: THREE.Vector3, r: number, height: number, reserved: THREE.Vector3[], ignoreReserved = false): boolean {
+function free(phys: Physics, p: THREE.Vector3, r: number, height: number, reserved: THREE.Vector3[], ignoreReserved = false, pad = 0.18): boolean {
   for (const o of phys.objs) {
     if (o.kind === 'desk' || o.kind === 'avatar') continue;
     const t = o.body.translation();
@@ -80,7 +80,7 @@ function free(phys: Physics, p: THREE.Vector3, r: number, height: number, reserv
     const or = footprint.get(o) ?? 0.15;
     if (Math.hypot(t.x - p.x, t.z - p.z) < r + or) return false;
   }
-  if (!ignoreReserved) for (const q of reserved) if (Math.abs(q.y - p.y) < 0.5 && Math.hypot(q.x - p.x, q.z - p.z) < r + 0.18) return false;
+  if (!ignoreReserved) for (const q of reserved) if (Math.abs(q.y - p.y) < 0.5 && Math.hypot(q.x - p.x, q.z - p.z) < r + pad) return false;
   return true;
 }
 
@@ -116,7 +116,7 @@ function chooseSpot(phys: Physics, kind: DecorSpotKind, key: string, size: THREE
     if (k === 'shelf' && small) {
       for (const [x, z] of SHELF_SPOTS) {
         const p = new THREE.Vector3(x, SHELF_Y, z + Math.max(0, size.z / 2 - 0.1));
-        if (free(phys, p, Math.min(r, 0.07), size.y, reserved)) return { pos: p, rotY: 0 };
+        if (free(phys, p, Math.min(r, 0.07), size.y, reserved, false, 0.04)) return { pos: p, rotY: 0 };
       }
     }
     if (k === 'wall') {
@@ -149,7 +149,8 @@ function chooseSpot(phys: Physics, kind: DecorSpotKind, key: string, size: THREE
     const p = new THREE.Vector3(x, 0, z);
     if (free(phys, p, r, size.y, reserved, true)) return { pos: p, rotY: Math.random() * Math.PI * 2 };
   }
-  return { pos: new THREE.Vector3(0.4, 0.6, 0.6), rotY: 0 };
+  // Room is packed: drop it from above somewhere in the middle and let physics sort it out.
+  return { pos: new THREE.Vector3((Math.random() - 0.5) * 2, 1.2, (Math.random() - 0.2) * 2), rotY: Math.random() * Math.PI * 2 };
 }
 
 /** Build a recipe prop (decor or gear), add it to the scene and the physics world. */

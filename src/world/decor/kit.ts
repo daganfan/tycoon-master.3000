@@ -135,7 +135,7 @@ export function starPts(outer: number, inner: number, n = 5): [number, number][]
 /** A pivot group (for parts that spin, bob or sway) placed at `pos`. */
 export function pivot(pos: V3 = [0, 0, 0], ...children: THREE.Object3D[]): THREE.Group {
   const g = place(new THREE.Group(), pos);
-  g.add(...children);
+  if (children.length) g.add(...children);
   return g;
 }
 

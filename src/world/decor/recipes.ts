@@ -212,7 +212,7 @@ export const DECOR_RECIPES: Record<string, Recipe> = {
       g.add(tube([[-w / 2, 0.25, 0.03], [w / 2, 0.25, 0.03]], 0.005, blue, 2));
       g.add(tube([[-w / 2, 0.03, 0.03], [-w / 2, 0.03 + h, 0.03]], 0.005, blue, 2));
       g.add(tube([[w / 2, 0.03, 0.03], [w / 2, 0.03 + h, 0.03]], 0.005, blue, 2));
-      const map = labelMap('OPEN 24/7', '#000000', '#ffffff', 512, 160, 'bold 110px "Trebuchet MS", sans-serif');
+      const map = labelMap('OPEN 24/7', '#000000', '#ffffff', 512, 160, 'bold 92px "Trebuchet MS", sans-serif');
       if (map) {
         const m = new THREE.MeshStandardMaterial({ color: '#000', emissive: '#ff3d9a', emissiveIntensity: 2.2, emissiveMap: map, transparent: true, alphaMap: map });
         m.userData.noSkin = true;
