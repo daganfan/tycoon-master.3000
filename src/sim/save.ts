@@ -5,7 +5,14 @@ import { SAVE_VERSION, createInitialState } from './state';
 type RawSave = Record<string, unknown> & { version: number };
 
 /** Ordered migrations: index i upgrades version i+1 → i+2. */
-const MIGRATIONS: ((s: RawSave) => RawSave)[] = [];
+const MIGRATIONS: ((s: RawSave) => RawSave)[] = [
+  // v1 → v2: prop layout persistence; old per-kind chaos cooldowns are dropped (chaos meter replaces them).
+  (s) => {
+    const counters = { ...((s.counters as Record<string, number> | undefined) ?? {}) };
+    for (const k of Object.keys(counters)) if (k.startsWith('cd_')) delete counters[k];
+    return { ...s, counters, layout: {}, version: 2 };
+  },
+];
 
 export function serialize(state: GameState, now = Date.now()): string {
   return JSON.stringify({
@@ -33,6 +40,7 @@ export function deserialize(text: string): GameState {
   s.floorCash = num(String(s.floorCash ?? 0));
   s.tokens = { ...base.tokens, ...s.tokens };
   s.settings = { ...base.settings, ...s.settings };
+  s.layout = s.layout ?? {};
   s.cosmetics = { owned: s.cosmetics?.owned ?? [], equipped: s.cosmetics?.equipped ?? {} };
   return s;
 }

@@ -1,7 +1,7 @@
 import { ZERO } from '@/core/num';
 import type { GameState } from './types';
 
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 
 export const BASE_STATS: Record<string, number> = {
   'click.power': 1,
@@ -9,13 +9,25 @@ export const BASE_STATS: Record<string, number> = {
   slots: 1,
   'exchange.rate': 1,
   vibe: 0,
-  'grind.threshold': 60,
+  'grind.threshold': 240,
   'magnet.radius': 1.5,
   'offline.cap': 2 * 3600,
   'offline.rate': 0.5,
   'shop.discount': 1,
+  /** Multiplier on Chaos Meter points. */
   'chaos.mult': 1,
-  'chaos.cooldown': 12,
+  /** Seconds before the same kind of mayhem with the same object counts again. */
+  'chaos.cooldown': 10,
+  /** Multiplier on how fast "you did that already" fatigue wears off. */
+  'chaos.decay': 1,
+  /** Multiplier on the meter size needed per Chaos Token. */
+  'chaos.need': 1,
+  'chaos.topple': 1,
+  'chaos.ragdoll': 1,
+  'crit.chance': 0,
+  'crit.mult': 1,
+  'macro.rate': 1,
+  'os.speed': 1,
   'coin.bounce': 0.3,
   'pickup.mult': 1,
   'cosmetic.slots': 1,
@@ -41,5 +53,6 @@ export function createInitialState(seed = Date.now() >>> 0, now = Date.now()): G
     quests: [],
     flags: [],
     settings: { comfort: 1, volume: 0.6, wallpaper: 0, reducedMotion: false },
+    layout: {},
   };
 }

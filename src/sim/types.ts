@@ -38,6 +38,8 @@ export interface TycoonActionDef<S> {
   label: string;
   /** The primary action is what auto-clickers and macros press. */
   primary?: boolean;
+  /** Set to false for fiddly actions (price nudges) that should not count toward Grind Tokens. */
+  grind?: boolean;
   run(s: S, rt: TycoonRuntime<S>, ctx: TycoonCtx, arg?: number): void;
 }
 
@@ -105,6 +107,8 @@ export interface SkillNodeDef {
   effects: NodeEffect[];
   keystone?: boolean;
   hidden?: boolean;
+  /** Legacy placeholders: invisible and unpurchasable until this phase is reached (`phase:<id>` state flag). */
+  phaseLocked?: Phase;
 }
 
 export type Rarity = 'common' | 'rare' | 'epic' | 'legendary' | 'glitched';
@@ -152,6 +156,22 @@ export interface Settings {
   reducedMotion: boolean;
 }
 
+/** Saved pose of a physical prop: current position/rotation and its "home" (where it was last placed). */
+export interface PropPose {
+  p: [number, number, number];
+  q: [number, number, number, number];
+  hp?: [number, number, number];
+  hq?: [number, number, number, number];
+}
+
+/** Extra info the world sends along with a mayhem event. */
+export interface ChaosInfo {
+  /** Size of the event: topple ≈ object heft (0.5–3), avalanche = fast coins, tower = height (m), ragdoll = drop (m). */
+  magnitude?: number;
+  /** Stable id of the object involved (for diminishing returns). */
+  object?: string;
+}
+
 export interface GameState {
   version: number;
   rngState: number;
@@ -170,4 +190,6 @@ export interface GameState {
   quests: string[];
   flags: string[];
   settings: Settings;
+  /** Prop placements keyed by stable id (`desk`, `used_monitor#0`, ...). */
+  layout: Record<string, PropPose>;
 }
