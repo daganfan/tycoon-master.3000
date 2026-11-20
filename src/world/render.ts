@@ -33,7 +33,7 @@ interface Preset {
 
 export const PRESETS: Record<Level, Preset> = {
   low: { dpr: 1, shadowMap: 1024, shadowRadius: 1, pointShadows: false, pointShadowMap: 256, post: false, aa: 'none', ao: 0, aoSamples: 0, bloom: false, dust: 0 },
-  medium: { dpr: 1.25, shadowMap: 1024, shadowRadius: 2.5, pointShadows: false, pointShadowMap: 256, post: true, aa: 'fxaa', ao: 0.5, aoSamples: 8, bloom: true, dust: 120 },
+  medium: { dpr: 1.25, shadowMap: 1024, shadowRadius: 2.5, pointShadows: false, pointShadowMap: 256, post: true, aa: 'fxaa', ao: 1, aoSamples: 8, bloom: true, dust: 120 },
   high: { dpr: 1.5, shadowMap: 2048, shadowRadius: 3, pointShadows: true, pointShadowMap: 512, post: true, aa: 'smaa', ao: 1, aoSamples: 12, bloom: true, dust: 220 },
   ultra: { dpr: 2, shadowMap: 4096, shadowRadius: 3.5, pointShadows: true, pointShadowMap: 1024, post: true, aa: 'smaa', ao: 1, aoSamples: 16, bloom: true, dust: 320 },
 };
@@ -145,7 +145,7 @@ export class Graphics {
   private size = new THREE.Vector2(1, 1);
   private focus = 0;
   // auto quality measurement
-  private autoT = 0;
+  private autoT = -1;
   private autoFrames = 0;
   private autoSum = 0;
   private autoDone = false;
@@ -207,20 +207,31 @@ export class Graphics {
   }
 
   private resetAuto(): void {
-    this.autoT = 0;
+    this.autoT = -1;
     this.autoFrames = 0;
     this.autoSum = 0;
   }
 
-  private measure(dt: number): void {
+  /** Auto quality: after a warm-up, average real frame intervals and step down (or up once). */
+  private measure(): void {
     if (this.forced || this.quality !== 'auto' || this.autoDone) return;
-    if (document.visibilityState !== 'visible') return;
-    this.autoT += dt;
-    if (this.autoT < 1.2) return; // warm-up (shader compiles, texture uploads)
+    const now = performance.now() / 1000;
+    if (document.visibilityState !== 'visible') {
+      this.resetAuto();
+      return;
+    }
+    if (this.autoT < 0) {
+      this.autoT = now; // warm-up start
+      return;
+    }
+    if (now - this.autoT < 1.2) {
+      this.autoSum = now; // measurement start
+      return;
+    }
     this.autoFrames++;
-    this.autoSum += dt;
-    if (this.autoT < 3.2) return;
-    const avg = this.autoSum / Math.max(1, this.autoFrames);
+    const span = now - this.autoSum;
+    if (span < 2 && this.autoFrames > 0 && span / this.autoFrames < 0.25) return;
+    const avg = span / Math.max(1, this.autoFrames);
     const i = LEVELS.indexOf(this.active);
     this.resetAuto();
     if (avg > 1 / 45 && i > 0) {
@@ -309,7 +320,7 @@ export class Graphics {
     const scene = this.scene;
     const camera = this.camera;
     if (!scene || !camera) return;
-    this.measure(dt);
+    this.measure();
     for (const f of this.onFrame) f(dt, this.active);
     if (!this.composer) {
       this.renderer.render(scene, camera);
