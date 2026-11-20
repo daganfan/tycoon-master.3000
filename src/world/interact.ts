@@ -1,0 +1,476 @@
+import * as THREE from 'three';
+import type RAPIER from '@dimforge/rapier3d-compat';
+import type { Game } from '@/sim/game';
+import type { PropPose } from '@/sim/types';
+import type { Physics, PhysObj } from './physics';
+import type { Avatar } from './avatar';
+import { ROOM } from './room';
+
+/** What the interaction system needs from the world (kept small to avoid tight coupling). */
+export interface InteractHost {
+  readonly game: Game;
+  readonly phys: Physics;
+  readonly avatar: Avatar;
+  readonly camera: THREE.PerspectiveCamera;
+  readonly canvas: HTMLCanvasElement;
+  /** Camera yaw (third-person orbit). */
+  readonly yaw: number;
+  /** Meshes that are screens: clicking them focuses the screen instead of grabbing. */
+  screenMeshes(): THREE.Object3D[];
+}
+
+interface Tween {
+  obj: PhysObj;
+  fromPos: THREE.Vector3;
+  fromQuat: THREE.Quaternion;
+  toPos: THREE.Vector3;
+  toQuat: THREE.Quaternion;
+  t: number;
+  dur: number;
+  delay: number;
+  arc: number;
+}
+
+interface Held {
+  obj: PhysObj;
+  /** Grab point in the body's local frame. */
+  local: THREE.Vector3;
+  heavy: boolean;
+  byMouse: boolean;
+  damping: number;
+}
+
+const TOYS = new Set(['duck', 'sock', 'remote']);
+const HEAVY_KINDS = new Set(['desk', 'table']);
+const HEAVY_MASS = 20;
+const REACH = 2.2;
+const SAVE_EVERY = 1;
+
+const v3 = (a: THREE.Vector3Like) => new THREE.Vector3(a.x, a.y, a.z);
+const round = (n: number) => Math.round(n * 1000) / 1000;
+
+/**
+ * Player interaction with physical props: grab & carry (with a springy hold so
+ * things swing), shove heavy furniture, stand toppled things back up (R), tidy
+ * the whole room, rescue things that fell out of the world, and persist the
+ * layout of every prop in the save.
+ */
+export class Interact {
+  held: Held | null = null;
+  holdDist = 1.1;
+  private tweens: Tween[] = [];
+  private raycaster = new THREE.Raycaster();
+  private now = 0;
+  private saveAcc = 0;
+  private pendingHome = new Map<PhysObj, number>();
+
+  constructor(private readonly w: InteractHost) {}
+
+  /* ------------------------------------------------------------ registry */
+
+  /** Objects that belong to the room layout (have a stable id). */
+  layoutObjs(): PhysObj[] {
+    return this.w.phys.objs.filter((o) => !!o.id);
+  }
+
+  private grabbable(): PhysObj[] {
+    return this.w.phys.objs.filter((o) => o.kind !== 'avatar' && o.body.isDynamic());
+  }
+
+  /** Give an object a stable id and restore its saved pose (if any). */
+  register(o: PhysObj, id: string): void {
+    o.id = id;
+    const pose = this.w.game.state.layout[id];
+    if (!pose) return;
+    const p = new THREE.Vector3(...pose.p);
+    if (!inside(p)) return;
+    o.body.setTranslation(p, true);
+    o.body.setRotation(new THREE.Quaternion(...pose.q), true);
+    if (pose.hp && pose.hq && inside(new THREE.Vector3(...pose.hp))) {
+      o.home.pos.set(...pose.hp);
+      o.home.quat.set(...pose.hq);
+    }
+    o.wasUpright = up(o).y > 0.9;
+    this.w.phys.sync(o);
+  }
+
+  isHeavy(o: PhysObj): boolean {
+    return HEAVY_KINDS.has(o.kind) || o.body.mass() > HEAVY_MASS;
+  }
+
+  /* ------------------------------------------------------------ input */
+
+  /** Left mouse down: grab the prop under the cursor if it's within reach. */
+  pointerDown(e: PointerEvent): boolean {
+    if (this.held && e.button === 2) {
+      this.release(false);
+      return true;
+    }
+    if (e.button !== 0 || this.held) return false;
+    const hit = this.pick(e);
+    if (!hit) return false;
+    this.grab(hit.obj, hit.point, true);
+    return true;
+  }
+
+  pointerUp(_e: PointerEvent): boolean {
+    if (this.held?.byMouse) {
+      this.release(true);
+      return true;
+    }
+    return false;
+  }
+
+  wheel(dy: number): boolean {
+    if (!this.held) return false;
+    this.holdDist = THREE.MathUtils.clamp(this.holdDist - Math.sign(dy) * 0.12, 0.7, 2.0);
+    return true;
+  }
+
+  /** G: grab the thing in front of you, or drop what you hold. */
+  toggleGrab(): void {
+    if (this.held) return this.release(false);
+    const o = this.inFront();
+    if (o) this.grab(o, o.body.translation(), false);
+  }
+
+  /** R: stand the nearest toppled object back upright where it lies. */
+  uprightNearest(): boolean {
+    const o = this.nearestToppled();
+    if (!o) return false;
+    if (this.held?.obj === o) this.release(false);
+    this.tweenTo(o, this.uprightPose(o), 0.45, 0, 0.25);
+    return true;
+  }
+
+  /** Return every furniture/prop to its home (spawn spot or last deliberate placement). */
+  tidyAll(): number {
+    if (this.held) this.release(false);
+    let n = 0;
+    for (const o of this.layoutObjs()) {
+      const far = o.body.translation();
+      const moved = v3(far).distanceTo(o.home.pos) > 0.03 || quatAngle(rot(o), o.home.quat) > 0.05;
+      if (!moved) continue;
+      this.tweenTo(o, { pos: o.home.pos.clone(), quat: o.home.quat.clone() }, 0.9, n * 0.05, 0.45);
+      n++;
+    }
+    return n;
+  }
+
+  /* ------------------------------------------------------------ queries */
+
+  private ownerOf(obj: THREE.Object3D): PhysObj | undefined {
+    const objs = this.grabbable();
+    for (let o: THREE.Object3D | null = obj; o; o = o.parent) {
+      const found = objs.find((p) => p.mesh === o);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  private pick(e: PointerEvent): { obj: PhysObj; point: THREE.Vector3 } | null {
+    const r = this.w.canvas.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    this.raycaster.setFromCamera(ndc, this.w.camera);
+    const objs = this.grabbable();
+    const screens = new Set(this.w.screenMeshes());
+    const hits = this.raycaster.intersectObjects(objs.map((o) => o.mesh), true);
+    const avatar = this.w.avatar.position;
+    for (const h of hits) {
+      if (screens.has(h.object)) return null; // clicking a screen uses it
+      const o = this.ownerOf(h.object);
+      if (!o) continue;
+      if (h.point.distanceTo(avatar) > REACH) return null;
+      return { obj: o, point: h.point };
+    }
+    return null;
+  }
+
+  private forward(): THREE.Vector3 {
+    return new THREE.Vector3(-Math.sin(this.w.yaw), 0, -Math.cos(this.w.yaw));
+  }
+
+  /** Best grabbable object in front of the avatar (cone around the camera direction). */
+  inFront(): PhysObj | null {
+    const p = this.w.avatar.position;
+    const f = this.forward();
+    let best: PhysObj | null = null;
+    let bestScore = Infinity;
+    for (const o of this.grabbable()) {
+      const d = v3(o.body.translation()).sub(p);
+      d.y = Math.max(-0.4, Math.min(0.4, d.y));
+      const dist = d.length();
+      if (dist > REACH) continue;
+      const flat = new THREE.Vector3(d.x, 0, d.z).normalize();
+      const cos = flat.dot(f);
+      if (cos < 0.35 && dist > 0.6) continue;
+      const score = dist * (2 - cos);
+      if (score < bestScore) {
+        bestScore = score;
+        best = o;
+      }
+    }
+    return best;
+  }
+
+  nearestToppled(): PhysObj | null {
+    const p = this.w.avatar.position;
+    let best: PhysObj | null = null;
+    let bd = REACH;
+    for (const o of this.grabbable()) {
+      if (up(o).y > 0.9 || this.tweens.some((t) => t.obj === o)) continue;
+      const d = v3(o.body.translation()).distanceTo(p);
+      if (d < bd) {
+        bd = d;
+        best = o;
+      }
+    }
+    return best;
+  }
+
+  /* ------------------------------------------------------------ grab */
+
+  private grab(o: PhysObj, point: THREE.Vector3Like, byMouse: boolean): void {
+    const inv = rot(o).invert();
+    const local = v3(point).sub(v3(o.body.translation())).applyQuaternion(inv);
+    // Grabbing by the centre for G keeps things stable; mouse grabs keep the exact point so they swing.
+    if (!byMouse) local.set(0, local.y * 0.3, 0);
+    const heavy = this.isHeavy(o);
+    this.held = { obj: o, local, heavy, byMouse, damping: o.body.angularDamping() };
+    this.holdDist = THREE.MathUtils.clamp(v3(point).distanceTo(this.w.avatar.position), 0.8, 1.4);
+    if (!heavy) o.body.setAngularDamping(3);
+    o.body.wakeUp();
+    this.tweens = this.tweens.filter((t) => t.obj !== o);
+  }
+
+  release(throwIt: boolean): void {
+    const h = this.held;
+    if (!h) return;
+    this.held = null;
+    const b = h.obj.body;
+    b.setAngularDamping(h.damping);
+    if (throwIt && !h.heavy) {
+      const v = b.linvel();
+      const boost = Math.min(1.5, 8 / Math.max(0.1, Math.hypot(v.x, v.y, v.z)));
+      b.setLinvel({ x: v.x * boost, y: v.y * boost, z: v.z * boost }, true);
+    }
+    h.obj.handledUntil = this.now + 1.5;
+    if (h.obj.id) this.pendingHome.set(h.obj, this.now);
+  }
+
+  private holdTarget(): THREE.Vector3 {
+    const p = this.w.avatar.position;
+    return p.add(this.forward().multiplyScalar(this.holdDist)).add(new THREE.Vector3(0, 0.3, 0));
+  }
+
+  private updateHeld(dt: number): void {
+    const h = this.held;
+    if (!h) return;
+    const b = h.obj.body;
+    if (!b.isDynamic()) return this.release(false);
+    h.obj.handledUntil = this.now + 1.5;
+    const com = v3(b.translation());
+    const point = h.local.clone().applyQuaternion(rot(h.obj)).add(com);
+    const target = this.holdTarget();
+    const err = target.clone().sub(point);
+    if (err.length() > 3) return this.release(false); // snagged on something
+    const m = b.mass();
+    const lv = v3(b.linvel());
+    const av = v3(b.angvel());
+    const pointVel = lv.clone().add(av.clone().cross(point.clone().sub(com)));
+    if (h.heavy) {
+      // Too heavy to lift: you can only shove it along the floor.
+      err.y = 0;
+      const want = err.multiplyScalar(4).clampLength(0, 1.6);
+      const imp = want.sub(new THREE.Vector3(lv.x, 0, lv.z)).multiplyScalar(m * 0.08);
+      b.applyImpulse(imp, true);
+      return;
+    }
+    const want = err.multiplyScalar(10).clampLength(0, 7);
+    const imp = want.sub(pointVel).multiplyScalar(m * 0.3);
+    imp.y += m * 9.81 * dt; // carry the weight
+    b.applyImpulseAtPoint(imp, point, true);
+  }
+
+  /* ------------------------------------------------------------ upright / tidy */
+
+  /** Upright pose at the object's current spot: keep its heading, sit it on the surface below. */
+  uprightPose(o: PhysObj): { pos: THREE.Vector3; quat: THREE.Quaternion } {
+    const q = rot(o);
+    const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
+    if (fwd.x * fwd.x + fwd.z * fwd.z < 0.05) fwd.set(1, 0, 0).applyQuaternion(q);
+    const yaw = Math.atan2(fwd.x, fwd.z);
+    const quat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+    const c = new THREE.Box3().setFromObject(o.mesh).getCenter(new THREE.Vector3());
+    const surface = this.surfaceBelow(c, o.body);
+    // Measure how far the object's lowest point sits below its origin when upright.
+    const mesh = o.mesh;
+    const savedP = mesh.position.clone();
+    const savedQ = mesh.quaternion.clone();
+    mesh.position.set(0, 0, 0);
+    mesh.quaternion.copy(quat);
+    mesh.updateMatrixWorld(true);
+    const bottom = new THREE.Box3().setFromObject(mesh).min.y;
+    mesh.position.copy(savedP);
+    mesh.quaternion.copy(savedQ);
+    mesh.updateMatrixWorld(true);
+    const t = o.body.translation();
+    return { pos: new THREE.Vector3(t.x, surface - bottom + 0.02, t.z), quat };
+  }
+
+  private surfaceBelow(from: THREE.Vector3, self: RAPIER.RigidBody): number {
+    const R = this.w.phys.R;
+    const avatar = this.w.avatar.body;
+    const ray = new R.Ray({ x: from.x, y: from.y + 0.05, z: from.z }, { x: 0, y: -1, z: 0 });
+    const hit = this.w.phys.world.castRay(ray, 5, true, undefined, undefined, undefined, undefined, (c) => {
+      const p = c.parent();
+      return !p || (p.handle !== self.handle && p.handle !== avatar.handle);
+    });
+    return hit ? from.y + 0.05 - hit.timeOfImpact : 0;
+  }
+
+  private tweenTo(o: PhysObj, to: { pos: THREE.Vector3; quat: THREE.Quaternion }, dur: number, delay: number, arc: number): void {
+    this.tweens = this.tweens.filter((t) => t.obj !== o);
+    const R = this.w.phys.R;
+    o.body.setBodyType(R.RigidBodyType.KinematicPositionBased, true);
+    o.handledUntil = Infinity;
+    this.tweens.push({ obj: o, fromPos: v3(o.body.translation()), fromQuat: rot(o), toPos: to.pos, toQuat: to.quat, t: 0, dur, delay, arc });
+  }
+
+  private updateTweens(dt: number): void {
+    const R = this.w.phys.R;
+    for (const tw of [...this.tweens]) {
+      if (tw.delay > 0) {
+        tw.delay -= dt;
+        continue;
+      }
+      tw.t = Math.min(1, tw.t + dt / tw.dur);
+      const k = tw.t * tw.t * (3 - 2 * tw.t);
+      const p = tw.fromPos.clone().lerp(tw.toPos, k);
+      p.y += Math.sin(Math.PI * tw.t) * tw.arc;
+      const q = tw.fromQuat.clone().slerp(tw.toQuat, k);
+      const b = tw.obj.body;
+      b.setNextKinematicTranslation(p);
+      b.setNextKinematicRotation(q);
+      if (tw.t >= 1) {
+        this.tweens.splice(this.tweens.indexOf(tw), 1);
+        b.setBodyType(R.RigidBodyType.Dynamic, true);
+        b.setTranslation(tw.toPos, true);
+        b.setRotation(tw.toQuat, true);
+        b.setLinvel({ x: 0, y: 0, z: 0 }, true);
+        b.setAngvel({ x: 0, y: 0, z: 0 }, true);
+        tw.obj.wasUpright = up(tw.obj).y > 0.9;
+        tw.obj.handledUntil = this.now + 1;
+      }
+    }
+  }
+
+  busy(o: PhysObj): boolean {
+    return (o.handledUntil ?? -1) > this.now;
+  }
+
+  /* ------------------------------------------------------------ rescue + persistence */
+
+  private rescue(): void {
+    for (const o of this.w.phys.objs) {
+      if (this.tweens.some((t) => t.obj === o)) continue;
+      const p = v3(o.body.translation());
+      if (o.kind === 'avatar') {
+        if (!inside(p, 0.6)) {
+          o.body.setTranslation({ x: 0.3, y: 1, z: 0.6 }, true);
+          o.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+        }
+        continue;
+      }
+      if (inside(p)) continue;
+      if (this.held?.obj === o) this.release(false);
+      const to = o.id ? o.home.pos : new THREE.Vector3(0, 1.2, 0);
+      o.body.setTranslation(to, true);
+      if (o.id) o.body.setRotation(o.home.quat, true);
+      o.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      o.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      o.handledUntil = this.now + 1;
+    }
+  }
+
+  /** After a deliberate drop, once the object settles upright, that spot becomes its new home. */
+  private settleHomes(): void {
+    for (const [o, since] of this.pendingHome) {
+      if (this.now - since > 8 || !this.w.phys.objs.includes(o)) {
+        this.pendingHome.delete(o);
+        continue;
+      }
+      const lv = o.body.linvel();
+      const av = o.body.angvel();
+      if (Math.hypot(lv.x, lv.y, lv.z) > 0.05 || Math.hypot(av.x, av.y, av.z) > 0.1) continue;
+      this.pendingHome.delete(o);
+      const p = v3(o.body.translation());
+      if (up(o).y > 0.9 && inside(p)) {
+        o.home.pos.copy(p);
+        o.home.quat.copy(rot(o));
+      }
+    }
+  }
+
+  saveLayout(): void {
+    const layout: Record<string, PropPose> = {};
+    for (const o of this.layoutObjs()) {
+      const t = o.body.translation();
+      const r = o.body.rotation();
+      const h = o.home;
+      layout[o.id!] = {
+        p: [round(t.x), round(t.y), round(t.z)],
+        q: [round(r.x), round(r.y), round(r.z), round(r.w)],
+        hp: [round(h.pos.x), round(h.pos.y), round(h.pos.z)],
+        hq: [round(h.quat.x), round(h.quat.y), round(h.quat.z), round(h.quat.w)],
+      };
+    }
+    this.w.game.state.layout = layout;
+  }
+
+  /** Call once per frame before the physics step. */
+  update(dt: number): void {
+    this.now += dt;
+    this.updateHeld(dt);
+    this.updateTweens(dt);
+    this.rescue();
+    this.settleHomes();
+    this.saveAcc += dt;
+    if (this.saveAcc >= SAVE_EVERY) {
+      this.saveAcc = 0;
+      this.saveLayout();
+    }
+  }
+
+  /** Short contextual hint for the HUD, or '' if nothing to say. */
+  hint(): string {
+    if (this.held)
+      return this.held.heavy
+        ? 'Too heavy to lift: walk to shove it · G / right-click to let go'
+        : 'Carrying · wheel = closer/further · release to throw · G / right-click to drop';
+    if (this.nearestToppled()) return 'R — stand it back up · G — grab';
+    return '';
+  }
+
+  isToy(o: PhysObj): boolean {
+    return TOYS.has(o.kind);
+  }
+}
+
+function rot(o: PhysObj): THREE.Quaternion {
+  const r = o.body.rotation();
+  return new THREE.Quaternion(r.x, r.y, r.z, r.w);
+}
+
+function up(o: PhysObj): THREE.Vector3 {
+  return new THREE.Vector3(0, 1, 0).applyQuaternion(rot(o));
+}
+
+function quatAngle(a: THREE.Quaternion, b: THREE.Quaternion): number {
+  return a.angleTo(b);
+}
+
+/** Inside the bedroom (with a margin), above the floor and below the ceiling. */
+export function inside(p: THREE.Vector3Like, margin = 0.35): boolean {
+  return Math.abs(p.x) < ROOM.hx + margin && Math.abs(p.z) < ROOM.hz + margin && p.y > -0.5 && p.y < ROOM.h + 1.5;
+}

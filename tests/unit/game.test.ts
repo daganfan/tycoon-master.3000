@@ -32,6 +32,12 @@ describe('Game basics', () => {
     expect(g.state.floorCash.eq(0)).toBe(true);
   });
 
+  it('price nudges do not count toward Grind Tokens', () => {
+    const g = fresh();
+    for (let i = 0; i < 50; i++) g.action('lemon_mogul', i % 2 ? 'priceUp' : 'priceDown');
+    expect(g.state.counters.grindProgress ?? 0).toBe(0);
+  });
+
   it('awards Grind Tokens for manual actions', () => {
     const g = fresh();
     const need = g.grindNeeded();
@@ -124,12 +130,44 @@ describe('Tycoons', () => {
 });
 
 describe('Chaos and cosmetics', () => {
-  it('chaos events award tokens with cooldown', () => {
+  it('chaos events fill a meter with cooldowns and diminishing returns', () => {
     const g = fresh();
-    expect(g.reportChaos('topple')).toBe(true);
-    expect(g.reportChaos('topple')).toBe(false);
-    expect(g.reportChaos('avalanche')).toBe(true);
-    expect(g.state.tokens.chaos).toBe(2);
+    const first = g.reportChaos('topple', { magnitude: 1, object: 'chair' });
+    expect(first).toBeGreaterThan(0);
+    expect(g.reportChaos('topple', { magnitude: 1, object: 'chair' })).toBe(0); // cooldown
+    expect(g.state.tokens.chaos).toBe(0); // one topple is not a token
+    for (let i = 0; i < 120; i++) g.tick(0.1);
+    const again = g.reportChaos('topple', { magnitude: 1, object: 'chair' });
+    expect(again).toBeGreaterThan(0);
+    expect(again).toBeLessThan(first); // same object again: diminishing returns
+    const other = g.reportChaos('avalanche', { magnitude: 30 });
+    expect(other).toBeGreaterThan(again);
+  });
+
+  it('awards a Chaos Token when the meter fills and the meter grows', () => {
+    const g = fresh();
+    const need = g.chaosNeeded();
+    let t = 0;
+    const objs = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l'];
+    while (g.state.tokens.chaos === 0 && t < 200) {
+      g.reportChaos('topple', { magnitude: 2, object: objs[t % objs.length] });
+      for (let i = 0; i < 100; i++) g.tick(0.1);
+      t++;
+    }
+    expect(g.state.tokens.chaos).toBe(1);
+    expect(g.chaosNeeded()).toBeGreaterThan(need);
+  });
+
+  it('spamming the same event gives almost nothing', () => {
+    const g = fresh();
+    let total = 0;
+    for (let i = 0; i < 60; i++) {
+      total += g.reportChaos('ragdoll', { magnitude: 2 });
+      for (let k = 0; k < 110; k++) g.tick(0.1); // just past the cooldown
+    }
+    // 60 identical falls in ~11 minutes should not be worth more than a few tokens.
+    expect(total).toBeLessThan(g.chaosNeeded() * 4);
+    expect(g.reportChaos('ragdoll', { magnitude: 0 })).toBe(0);
   });
 
   it('buys and equips modifiers within slot limits', () => {
@@ -186,5 +224,27 @@ describe('Save / load', () => {
     store.data.set('main', '{broken');
     const loaded = await readSave(store);
     expect(loaded?.cash.eq(0)).toBe(true);
+  });
+});
+
+describe('Save migration', () => {
+  it('migrates v1 saves to v2 with an empty layout', () => {
+    const g = fresh();
+    const raw = JSON.parse(serialize(g.state)) as Record<string, unknown>;
+    raw.version = 1;
+    delete raw.layout;
+    raw.counters = { cd_topple: 99, manual: 5 };
+    const back = deserialize(JSON.stringify(raw));
+    expect(back.version).toBe(2);
+    expect(back.layout).toEqual({});
+    expect(back.counters.cd_topple).toBeUndefined();
+    expect(back.counters.manual).toBe(5);
+  });
+
+  it('round-trips prop layout', () => {
+    const g = fresh();
+    g.state.layout['used_monitor#0'] = { p: [1, 2, 3], q: [0, 0, 0, 1], hp: [1, 0.8, 3], hq: [0, 0, 0, 1] };
+    const back = deserialize(serialize(g.state));
+    expect(back.layout['used_monitor#0']?.p).toEqual([1, 2, 3]);
   });
 });

@@ -4,6 +4,7 @@ import { ITEMS } from '@/content/items';
 import { SKILL_NODES } from '@/content/skilltree';
 import { TYCOONS, tycoonById } from '@/sim/tycoons';
 import { upgradeCost } from '@/sim/tycoons/framework';
+import { lemonSuggested } from '@/sim/tycoons/lemonMogul';
 
 export interface BotReport {
   firstNode?: number;
@@ -11,18 +12,23 @@ export interface BotReport {
   socks?: number;
   couch?: number;
   garage?: number;
+  /** Tokens earned over the whole run, per kind. */
+  earned: { grind: number; mogul: number; chaos: number };
   log: string[];
 }
 
 /**
  * A greedy "active player" bot used for balance checks. It clicks a few times
  * per second, buys the cheapest upgrade it can afford, cashes out, picks up all
- * coins and reports occasional mayhem.
+ * coins and causes occasional, realistic mayhem through the Chaos Meter.
  */
 export function runBot(maxSeconds: number, clicksPerSecond = 3, seed = 42): BotReport {
   const g = new Game(createInitialState(seed, 0));
   g.setFlag('booted');
-  const r: BotReport = { log: [] };
+  const r: BotReport = { log: [], earned: { grind: 0, mogul: 0, chaos: 0 } };
+  g.bus.on('token', (e) => {
+    if (e.token === 'grind' || e.token === 'mogul' || e.token === 'chaos') r.earned[e.token] += e.amount;
+  });
   for (let t = 0; t < maxSeconds; t++) {
     const newest = Object.keys(g.state.tycoons).at(-1)!;
     g.focused = newest;
@@ -49,7 +55,7 @@ export function runBot(maxSeconds: number, clicksPerSecond = 3, seed = 42): BotR
       if (t % 20 === 0) g.cashOut(rt.id);
     }
     g.collectAll();
-    if (t % 90 === 45) g.reportChaos((['topple', 'avalanche', 'tower', 'ragdoll'] as const)[(t / 90) % 4 | 0]!);
+    simulateMayhem(g, t);
     for (const def of TYCOONS) if (g.canUnlockTycoon(def.id)) g.unlockTycoon(def.id);
     for (const id of Object.keys(g.state.tycoons)) g.setRunning(id, true);
     const nextUnlock = TYCOONS.find((d) => !g.state.tycoons[d.id])?.unlockCost ?? 1200000;
@@ -65,14 +71,34 @@ export function runBot(maxSeconds: number, clicksPerSecond = 3, seed = 42): BotR
       r.garage = t;
       break;
     }
-    if (t % 300 === 0) r.log.push(`${t / 60}m cash=${g.state.cash.toFixed(0)} click=${g.stat('click.power').toFixed(1)} ex=${g.exchangeRate().toFixed(2)} ` + g.running().map((rt) => `${rt.id.slice(0, 4)}:L${rt.level} life=${rt.lifetime.toFixed(0)} up=${JSON.stringify(rt.upgrades)}`).join(' | '));
+    if (t % 300 === 0) r.log.push(`${t / 60}m tok=${JSON.stringify(g.state.tokens)} nodes=${g.state.nodes.length} cash=${g.state.cash.toFixed(0)} click=${g.stat('click.power').toFixed(1)} ex=${g.exchangeRate().toFixed(2)} ` + g.running().map((rt) => `${rt.id.slice(0, 4)}:L${rt.level} life=${rt.lifetime.toFixed(0)} up=${JSON.stringify(rt.upgrades)}`).join(' | '));
   }
   return r;
 }
 
+const MAYHEM_OBJECTS = ['chair', 'monitor', 'pc', 'desk', 'cardboard_boxes#0', 'used_monitor#0', 'lava_lamp#0', 'desk_fan#0'];
+
+/**
+ * A realistic amount of physics mayhem for a player who mostly plays the games:
+ * knocks something over every ~40s (cycling through what is in the room),
+ * takes a real fall now and then, and causes a coin avalanche after big cash-outs.
+ * Everything goes through the Chaos Meter, so diminishing returns apply.
+ */
+function simulateMayhem(g: Game, t: number): void {
+  if (t % 40 === 20) {
+    const objs = MAYHEM_OBJECTS.filter((o) => !o.includes('#') || (g.state.items[o.split('#')[0]!] ?? 0) > 0);
+    g.reportChaos('topple', { magnitude: 1.2, object: objs[(t / 40) % objs.length | 0]! });
+  }
+  if (t % 150 === 75) g.reportChaos('ragdoll', { magnitude: 1.7 });
+  if (t % 120 === 60 && g.state.lifetimeCash.gt(50)) g.reportChaos('avalanche', { magnitude: 20 });
+  if (t % 300 === 150 && (g.state.items.cardboard_boxes ?? 0) >= 3) g.reportChaos('tower', { magnitude: 1.4, object: `cardboard_boxes#${(t / 300) % 3 | 0}` });
+}
+
 function tuneLemon(g: Game): void {
-  const s = g.state.tycoons.lemon_mogul!.state as { price: number; cups: number };
-  // Sell near the revenue-optimal price when cups pile up, cheaper when short.
-  if (s.cups > 20 && s.price < 1.2) g.action('lemon_mogul', 'priceUp');
-  if (s.cups < 2 && s.price > 0.4) g.action('lemon_mogul', 'priceDown');
+  const rt = g.state.tycoons.lemon_mogul!;
+  const s = rt.state as { price: number; cups: number };
+  // Follow the suggested price; go a bit higher when cups pile up, cheaper when short.
+  const target = lemonSuggested(rt) * (s.cups > 20 ? 1.15 : s.cups < 2 ? 0.8 : 1);
+  if (s.price < target - 0.04) g.action('lemon_mogul', 'priceUp');
+  else if (s.price > target + 0.04) g.action('lemon_mogul', 'priceDown');
 }

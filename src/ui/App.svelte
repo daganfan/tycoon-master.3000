@@ -88,6 +88,7 @@
       <button onclick={() => ui.unfocus?.()}>🚶 Step back <kbd>Esc</kbd></button>
     {:else}
       <button onclick={() => ui.focusMain?.()} data-testid="use-pc">🖥️ Use PC <kbd>E</kbd></button>
+      <button onclick={() => ui.tidy?.()} data-testid="tidy" title="Put all furniture and props back in place">🧹 Tidy up</button>
     {/if}
   </div>
 

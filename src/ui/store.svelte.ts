@@ -13,4 +13,6 @@ export const ui = $state<{
   modal: Modal | null;
   focusMain?: () => void;
   unfocus?: () => void;
+  /** Return all furniture/props to their home spots. */
+  tidy?: () => void;
 }>({ loading: 'Booting up…', hint: '', focused: false, tree: false, modal: null });

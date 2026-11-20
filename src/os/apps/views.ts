@@ -1,6 +1,6 @@
 import { formatNum } from '@/core/num';
 import type { TycoonRuntime } from '@/sim/types';
-import { WEATHER_MULT, type LemonState } from '@/sim/tycoons/lemonMogul';
+import { WEATHER_MULT, buyChance, lemonSuggested, refPrice, type LemonState } from '@/sim/tycoons/lemonMogul';
 import { duckPrice, type DuckState } from '@/sim/tycoons/rubberDuckWorks';
 import { SOCK_COLORS, binCapacity, type SockState } from '@/sim/tycoons/sockSyndicate';
 import type { CouchState } from '@/sim/tycoons/couchCoinMining';
@@ -66,17 +66,28 @@ export const VIEWS: Record<string, View> = {
       ui.emoji(['🧍', '🚶', '🧑', '👩', '🧓'][i % 5]!, x, r.y + r.h * 0.76, 34);
     }
     g.restore();
-    ui.rect({ x: r.x + 10, y: r.y + 10, w: 360, h: 74 }, 'rgba(0,0,0,0.45)', 8);
+    const forecast = os.game.flag('lemon.forecast') && s.next;
+    ui.rect({ x: r.x + 10, y: r.y + 10, w: 380, h: forecast ? 128 : 102 }, 'rgba(0,0,0,0.45)', 8);
     ui.text(`🥤 Cups: ${formatNum(s.cups)}`, r.x + 24, r.y + 32, { size: 18, bold: true, color: '#fff' });
-    ui.text(`Weather: ${s.weather} (x${WEATHER_MULT[s.weather]})`, r.x + 24, r.y + 62, { size: 15, color: '#fff' });
+    ui.text(`Weather: ${s.weather} (x${WEATHER_MULT[s.weather]} customers)`, r.x + 24, r.y + 62, { size: 15, color: '#fff' });
+    const suggested = lemonSuggested(rt);
+    const share = Math.round(buyChance(s.price, refPrice(s.weather, rt.upgrades)) * 100);
+    ui.text(`💡 Suggested price: $${suggested.toFixed(2)} · ${share}% buy at yours`, r.x + 24, r.y + 88, { size: 14, color: '#ffe680' });
+    if (forecast) ui.text(`📡 Forecast: ${s.next} in ${Math.ceil(s.weatherTimer)}s`, r.x + 24, r.y + 114, { size: 14, color: '#bfe8ff' });
     const py = r.y + r.h - 70;
-    ui.rect({ x: r.x + 10, y: py, w: 300, h: 60 }, 'rgba(0,0,0,0.45)', 8);
+    ui.rect({ x: r.x + 10, y: py, w: 390, h: 60 }, 'rgba(0,0,0,0.45)', 8);
     ui.text(`Price $${s.price.toFixed(2)}`, r.x + 24, py + 30, { size: 20, bold: true, color: '#fff' });
     if (ui.button({ x: r.x + 170, y: py + 10, w: 60, h: 40 }, '−5¢', { size: 15 })) os.game.action(rt.id, 'priceDown');
     if (ui.button({ x: r.x + 240, y: py + 10, w: 60, h: 40 }, '+5¢', { size: 15 })) os.game.action(rt.id, 'priceUp');
+    if (ui.button({ x: r.x + 310, y: py + 10, w: 80, h: 40 }, '💡 Use', { size: 14, disabled: Math.abs(s.price - suggested) < 0.001 }))
+      os.game.action(rt.id, 'priceSuggested');
+    if ((rt.upgrades.umbrella ?? 0) > 0 && (s.weather === 'rainy' || s.weather === 'cloudy')) ui.emoji('☂️', sx - 40, sy + 120, 48);
+    if ((rt.upgrades.ice ?? 0) > 0) ui.emoji('🧊', sx + 250, sy + 130, 34);
     const big = { x: r.x + r.w - 230, y: r.y + r.h - 120, w: 210, h: 100 };
     if (ui.button(big, '🍋 SQUEEZE', { color: '#e0a800', size: 26 })) os.game.action(rt.id, 'squeeze');
-    if (s.cups < 1 && s.missed > 1)
+    if (share < 15)
+      ui.text('Too pricey for this weather! Try the suggested price.', r.x + r.w / 2, r.y + 150, { size: 17, bold: true, color: '#b00020', align: 'center' });
+    else if (s.cups < 1 && s.missed > 1)
       ui.text('Customers are leaving thirsty! Squeeze!', r.x + r.w / 2, r.y + 110, {
         size: 18,
         bold: true,
@@ -118,7 +129,8 @@ export const VIEWS: Record<string, View> = {
     ui.text(`x${rt.upgrades.mold ?? 0}`, r.x + 90, by - 85, { size: 30, bold: true, color: '#22223b', align: 'center' });
     ui.rect({ x: r.x + 10, y: r.y + 10, w: 330, h: 70 }, 'rgba(0,0,0,0.45)', 8);
     ui.text(`Ducks made: ${formatNum(s.made)}`, r.x + 24, r.y + 32, { size: 18, bold: true, color: '#fff' });
-    ui.text(`Price per duck: Q¢${duckPrice(rt.upgrades.quality ?? 0).toFixed(2)}`, r.x + 24, r.y + 60, { size: 15, color: '#fff' });
+    ui.text(`Price per duck: Q¢${duckPrice(rt.upgrades.quality ?? 0, rt.upgrades.inspector ?? 0, rt.upgrades.export ?? 0).toFixed(2)}`, r.x + 24, r.y + 60, { size: 15, color: '#fff' });
+    if ((rt.upgrades.inspector ?? 0) > 0) ui.emoji('🕵️', r.x + 190, by - 40, 40);
     ui.text('Jam risk', r.x + 14, r.y + 102, { size: 13, color: '#fff' });
     ui.bar({ x: r.x + 80, y: r.y + 95, w: Math.min(250, r.w - 100), h: 14 }, s.jamMeter, '#ff6b35');
     if (s.jammed) {
@@ -148,7 +160,7 @@ export const VIEWS: Record<string, View> = {
     ui.rect({ x: r.x + 10, y: r.y + 10, w: r.w - 20, h: 80 }, 'rgba(0,0,0,0.4)', 8);
     ui.text(`Bin ${total}/${cap}`, r.x + 24, r.y + 34, { size: 18, bold: true, color: '#fff' });
     ui.bar({ x: r.x + 160, y: r.y + 26, w: r.w - 200, h: 16 }, total / cap, total / cap > 0.85 ? '#ff4d4d' : '#7cf07c');
-    ui.text(`Pairs sold: ${formatNum(s.pairs)} · Lost socks: ${formatNum(s.lost)}`, r.x + 24, r.y + 66, { size: 15, color: '#fff' });
+    ui.text(`Pairs sold: ${formatNum(s.pairs)} · Lost socks: ${formatNum(s.lost)}${s.darned ? ` · Darned: ${formatNum(s.darned)}` : ''}`, r.x + 24, r.y + 66, { size: 15, color: '#fff' });
     if (ui.button({ x: r.x + 20, y: r.y + r.h - 100, w: 220, h: 80 }, `Sell ${formatNum(s.lost)} lost`, { size: 18, disabled: s.lost < 1 }))
       os.game.action(rt.id, 'sellLost');
     if (ui.button({ x: r.x + r.w - 240, y: r.y + r.h - 120, w: 220, h: 100 }, '🧦 MATCH', { color: '#8e44ad', size: 26 }))
@@ -168,7 +180,7 @@ export const VIEWS: Record<string, View> = {
       if (i === 0) ui.bar({ x: r.x + 120, y: r.y + lh * 1.5 - 10, w: r.w - 160, h: 20 }, s.hp / s.maxHp, '#ffcf56');
     }
     ui.rect({ x: r.x + 10, y: r.y + r.h - 80, w: r.w - 260, h: 70 }, 'rgba(0,0,0,0.5)', 8);
-    ui.text(`Depth ${s.depth} · ${formatNum(s.finds)} finds`, r.x + 24, r.y + r.h - 58, { size: 18, bold: true, color: '#fff' });
+    ui.text(`Depth ${s.depth} · ${formatNum(s.finds)} finds${s.rares ? ` · ✨${s.rares} rare` : ''}`, r.x + 24, r.y + r.h - 58, { size: 18, bold: true, color: '#fff' });
     ui.text(`Last find: ${s.lastFind}`, r.x + 24, r.y + r.h - 28, { size: 15, color: '#fff', maxWidth: r.w - 290 });
     if (ui.button({ x: r.x + r.w - 230, y: r.y + r.h - 120, w: 210, h: 100 }, '⛏️ DIG', { color: '#a0522d', size: 28 }))
       os.game.action(rt.id, 'dig');

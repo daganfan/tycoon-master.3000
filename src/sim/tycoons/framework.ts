@@ -8,7 +8,7 @@ export function upgradeCost(u: TycoonUpgradeDef, level: number): number {
 }
 
 /** Lifetime internal earnings needed to reach `level + 1`. */
-export const xpForLevel = (level: number): number => 15 * Math.pow(2.5, level);
+export const xpForLevel = (level: number): number => 100 * Math.pow(3, level);
 
 export function createRuntime<S>(def: TycoonDef<S>, rng: Rng): TycoonRuntime<S> {
   return { id: def.id, installed: false, money: 0, lifetime: 0, level: 0, upgrades: {}, state: def.init(rng) };

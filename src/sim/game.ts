@@ -10,7 +10,7 @@ import { TYCOONS, tycoonById } from './tycoons';
 import { createRuntime, upgradeCost, xpForLevel } from './tycoons/framework';
 import { BASE_STATS, createInitialState } from './state';
 import type {
-  ChaosKind, CosmeticTarget, GameState, TokenCost, TokenId, TycoonCtx, TycoonDef, TycoonRuntime,
+  ChaosInfo, ChaosKind, CosmeticTarget, GameState, TokenCost, TokenId, TycoonCtx, TycoonDef, TycoonRuntime,
 } from './types';
 
 export interface GameEvents extends Record<string, unknown> {
@@ -26,7 +26,19 @@ export interface GameEvents extends Record<string, unknown> {
   questDone: { id: string };
   tycoonInstalled: { id: string };
   respec: Record<string, never>;
+  chaos: { kind: ChaosKind; points: number; meter: number; need: number };
 }
+
+/** Base Chaos Meter points per unit of magnitude, and the cap for a single event. */
+const CHAOS_BASE: Record<ChaosKind, { per: number; cap: number }> = {
+  topple: { per: 16, cap: 45 },
+  avalanche: { per: 1, cap: 35 },
+  tower: { per: 12, cap: 40 },
+  ragdoll: { per: 11, cap: 40 },
+};
+/** Half-life (s) of the "you did that already" fatigue. */
+const CHAOS_FATIGUE_HALFLIFE = 60;
+const CHAOS_LABEL: Record<ChaosKind, string> = { topple: 'Knocked it over!', avalanche: 'Coin avalanche!', tower: 'Tower of junk!', ragdoll: 'Epic wipeout!' };
 
 const AUTO_CASHOUT_INTERVAL = 10;
 
@@ -40,6 +52,9 @@ export class Game {
   private autoAcc = 0;
   private macroAcc = 0;
   private cashoutAcc = 0;
+  /** Mayhem bookkeeping (runtime only): last time per key, and decaying fatigue values. */
+  private chaosFatigue = new Map<string, { v: number; t: number }>();
+  private chaosReady = new Map<string, number>();
 
   constructor(public state: GameState = createInitialState()) {
     this.rng = new Rng(state.rngState);
@@ -111,14 +126,14 @@ export class Game {
       def.tick(rt.state, rt, dt, this.ctx(rt));
     }
     if (this.flag('autoclick') && this.focused) {
-      this.autoAcc += dt * 3;
+      this.autoAcc += dt * 3 * this.stat('os.speed');
       while (this.autoAcc >= 1) {
         this.autoAcc--;
         this.pressPrimary(this.focused, false);
       }
     }
     if (this.flag('macro')) {
-      this.macroAcc += dt;
+      this.macroAcc += dt * this.stat('macro.rate') * this.stat('os.speed');
       while (this.macroAcc >= 1) {
         this.macroAcc--;
         for (const rt of this.running()) this.pressPrimary(rt.id, false);
@@ -126,7 +141,7 @@ export class Game {
     }
     if (this.flag('autoCashout')) {
       this.cashoutAcc += dt;
-      if (this.cashoutAcc >= AUTO_CASHOUT_INTERVAL) {
+      if (this.cashoutAcc >= AUTO_CASHOUT_INTERVAL / this.stat('os.speed')) {
         this.cashoutAcc = 0;
         for (const rt of this.running()) if (rt.money > 0) this.cashOut(rt.id);
       }
@@ -207,7 +222,11 @@ export class Game {
     const a = def.actions.find((x) => x.id === actionId);
     if (!a) return false;
     a.run(rt.state, rt, this.ctx(rt), arg);
-    this.countManual();
+    // Lucky clicks: a manual press of the main button sometimes counts several times.
+    if (a.primary && this.rng.chance(this.stat('crit.chance'))) {
+      for (let i = 0; i < Math.floor(this.stat('crit.mult')); i++) a.run(rt.state, rt, this.ctx(rt), arg);
+    }
+    if (a.grind !== false) this.countManual();
     return true;
   }
 
@@ -230,10 +249,10 @@ export class Game {
     }
   }
 
-  /** Manual actions needed for the next Grind Token (rises slowly as you earn more). */
+  /** Manual actions needed for the next Grind Token (rises steeply as you earn more). */
   grindNeeded(): number {
     const earned = this.state.counters.grindEarned ?? 0;
-    return Math.max(5, Math.round(this.stat('grind.threshold') * (1 + 0.08 * earned)));
+    return Math.max(10, Math.round(this.stat('grind.threshold') * (1 + 0.12 * earned) * Math.pow(1.04, earned)));
   }
 
   buyTycoonUpgrade(tycoonId: string, upgradeId: string): boolean {
@@ -253,14 +272,25 @@ export class Game {
   cashOutValue(tycoonId: string): Num {
     const rt = this.state.tycoons[tycoonId];
     if (!rt) return num(0);
-    return num(rt.money * tycoonById(tycoonId).rate * this.exchangeRate());
+    // Keystone: coins split when they hit the floor (+25% Cash).
+    const split = this.flag('coins.split') ? 1.25 : 1;
+    return num(rt.money * tycoonById(tycoonId).rate * this.exchangeRate() * split);
+  }
+
+  /** True when the next cash-out is a doubled "lucky tenth" (keystone). */
+  nextCashoutDoubled(): boolean {
+    return this.flag('cashout.tenth') && ((this.state.counters.cashouts ?? 0) + 1) % 10 === 0;
   }
 
   /** Convert a game's internal money into physical Cash on the floor. */
   cashOut(tycoonId: string): Num {
     const rt = this.state.tycoons[tycoonId];
-    const amount = this.cashOutValue(tycoonId);
+    let amount = this.cashOutValue(tycoonId);
     if (!rt || amount.lte(0)) return num(0);
+    if (this.nextCashoutDoubled()) {
+      amount = amount.mul(2);
+      this.bus.emit('notify', { text: '🎰 Lucky tenth cash-out: doubled!', tone: 'good' });
+    }
     rt.money = 0;
     this.state.floorCash = this.state.floorCash.add(amount);
     this.state.counters.cashouts = (this.state.counters.cashouts ?? 0) + 1;
@@ -361,6 +391,7 @@ export class Game {
     if (this.state.nodes.includes(id)) return 'owned';
     const def = nodeById(id);
     if (!def) return 'locked';
+    if (def.phaseLocked && !this.state.flags.includes(`phase:${def.phaseLocked}`)) return 'hidden';
     const reachable = def.requires.some((r) => this.state.nodes.includes(r));
     if (!reachable) return def.hidden ? 'hidden' : 'locked';
     return 'available';
@@ -407,17 +438,57 @@ export class Game {
 
   /* ---- chaos ---- */
 
-  /** Called by the physics world when mayhem happens. */
-  reportChaos(kind: ChaosKind): boolean {
-    const key = `cd_${kind}`;
-    const ready = this.state.counters[key] ?? 0;
-    if (this.state.time < ready) return false;
-    this.state.counters[key] = this.state.time + this.stat('chaos.cooldown');
-    this.state.counters.chaosEvents = (this.state.counters.chaosEvents ?? 0) + 1;
-    const amount = Math.max(1, Math.floor(this.stat('chaos.mult')));
-    const label = { topple: 'Knocked it over!', avalanche: 'Coin avalanche!', tower: 'Tower of junk!', ragdoll: 'Ragdolled!' }[kind];
-    this.addTokens('chaos', amount, label);
-    return true;
+  /** Chaos Meter points needed for the next Chaos Token (grows with each one earned). */
+  chaosNeeded(): number {
+    const earned = this.state.counters.chaosEarned ?? 0;
+    return Math.max(20, Math.round(100 * Math.pow(1.3, earned) * this.stat('chaos.need')));
+  }
+
+  private fatigue(key: string, bump: number): number {
+    const now = this.state.time;
+    const f = this.chaosFatigue.get(key);
+    const halfLife = CHAOS_FATIGUE_HALFLIFE / Math.max(0.1, this.stat('chaos.decay'));
+    const v = f ? f.v * Math.pow(0.5, (now - f.t) / halfLife) : 0;
+    this.chaosFatigue.set(key, { v: v + bump, t: now });
+    return v;
+  }
+
+  /**
+   * Called by the physics world when mayhem happens. Adds points to the Chaos
+   * Meter based on the event's magnitude, with diminishing returns for
+   * repeating the same kind of event and the same object. A Chaos Token drops
+   * when the meter fills. Returns the points added (0 if it didn't count).
+   */
+  reportChaos(kind: ChaosKind, info: ChaosInfo = {}): number {
+    const obj = info.object ?? '*';
+    const key = `${kind}:${obj}`;
+    const now = this.state.time;
+    if (now < (this.chaosReady.get(key) ?? -Infinity)) return 0;
+    const base = CHAOS_BASE[kind];
+    const mag = Math.max(0, info.magnitude ?? 1);
+    let pts = Math.min(base.cap, base.per * mag);
+    if (pts < 1) return 0;
+    this.chaosReady.set(key, now + this.stat('chaos.cooldown'));
+    const kindF = this.fatigue(`k:${kind}`, 1);
+    const objF = obj === '*' ? 0 : this.fatigue(`o:${obj}`, 1);
+    pts /= 1 + 0.45 * kindF + 0.9 * objF;
+    pts *= this.stat('chaos.mult');
+    if (kind === 'topple') pts *= this.stat('chaos.topple');
+    if (kind === 'ragdoll') pts *= this.stat('chaos.ragdoll');
+    pts = Math.round(pts * 10) / 10;
+    if (pts <= 0) return 0;
+    const c = this.state.counters;
+    c.chaosEvents = (c.chaosEvents ?? 0) + 1;
+    c.chaosMeter = (c.chaosMeter ?? 0) + pts;
+    let need = this.chaosNeeded();
+    while (c.chaosMeter >= need) {
+      c.chaosMeter -= need;
+      c.chaosEarned = (c.chaosEarned ?? 0) + 1;
+      this.addTokens('chaos', 1, CHAOS_LABEL[kind]);
+      need = this.chaosNeeded();
+    }
+    this.bus.emit('chaos', { kind, points: pts, meter: c.chaosMeter, need });
+    return pts;
   }
 
   /* ---- cosmetics ---- */

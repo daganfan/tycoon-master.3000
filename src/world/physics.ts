@@ -13,6 +13,12 @@ export interface PhysObj {
   wasUpright: boolean;
   wobble: number;
   lastVel: THREE.Vector3;
+  /** Stable id for persistence (`desk`, `used_monitor#0`, ...). Unset for transient toys. */
+  id?: string;
+  /** Where Tidy Up returns the object: its spawn pose, or where the player last placed it. */
+  home: { pos: THREE.Vector3; quat: THREE.Quaternion };
+  /** Player interaction (grab / tidy) is in control until this time (world seconds); chaos ignores it. */
+  handledUntil?: number;
 }
 
 export interface BodyOpts {
@@ -70,7 +76,10 @@ export class Physics {
 
   /** Register a mesh + body pair. Colliders must already be attached. */
   track(mesh: THREE.Object3D, body: RAPIER.RigidBody, kind: string, target: CosmeticTarget | null, base: PhysObj['base']): PhysObj {
-    const o: PhysObj = { mesh, body, kind, target, base, wasUpright: true, wobble: 0, lastVel: new THREE.Vector3() };
+    const t = body.translation();
+    const r = body.rotation();
+    const home = { pos: new THREE.Vector3(t.x, t.y, t.z), quat: new THREE.Quaternion(r.x, r.y, r.z, r.w) };
+    const o: PhysObj = { mesh, body, kind, target, base, wasUpright: true, wobble: 0, lastVel: new THREE.Vector3(), home };
     this.objs.push(o);
     this.sync(o);
     return o;
