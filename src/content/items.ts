@@ -1,4 +1,5 @@
 import type { ItemDef } from '@/sim/types';
+import { DECOR_ITEMS } from './decor';
 
 /** Bedroom shop ("eBuy"). Stat modifiers are per unit owned. */
 export const ITEMS: ItemDef[] = [
@@ -26,8 +27,49 @@ export const ITEMS: ItemDef[] = [
     baseCost: 130, growth: 2.8, max: 4, mods: [{ stat: 'magnet.radius', op: 'add', value: 1 }], phase: 'bedroom' },
   { id: 'piggy_bank', name: 'Piggy Bank', desc: 'Doubles offline earnings time cap.', icon: '🐷', category: 'utility',
     baseCost: 1200, growth: 1, max: 1, mods: [{ stat: 'offline.cap', op: 'mult', value: 2 }], prop: 'piggy', phase: 'bedroom' },
+  // Useful bedroom gear (props built from recipes in world/decor/gear.ts)
+  { id: 'gaming_headset', name: 'Gamer Headset', desc: '+25% click power. The RGB adds +0 performance.', icon: '🎧', category: 'hardware',
+    baseCost: 450, growth: 3.2, max: 2, mods: [{ stat: 'click.power', op: 'mult', value: 1.25 }], prop: 'headset', phase: 'bedroom' },
+  { id: 'wrist_rest', name: 'Gel Wrist Rest', desc: '+1 click power. Carpal tunnel: postponed.', icon: '🖐️', category: 'hardware',
+    baseCost: 1100, growth: 4, max: 2, mods: [{ stat: 'click.power', op: 'add', value: 1 }], prop: 'wristrest', phase: 'bedroom' },
+  { id: 'standing_mat', name: 'Anti-Fatigue Mat', desc: '+1 click power. Stand and deliver.', icon: '🟫', category: 'furniture',
+    baseCost: 650, growth: 1, max: 1, mods: [{ stat: 'click.power', op: 'add', value: 1 }], prop: 'mat', phase: 'bedroom' },
+  { id: 'mesh_router', name: 'Mesh Wi-Fi Router', desc: '+6% game speed. Seven antennas, zero bars.', icon: '📡', category: 'hardware',
+    baseCost: 4000, growth: 4, max: 2, mods: [{ stat: 'tycoon.speed', op: 'mult', value: 1.06 }], prop: 'router', phase: 'bedroom' },
+  { id: 'cable_kit', name: 'Cable Management Kit', desc: '+3% game speed. The power of zip ties.', icon: '🧵', category: 'utility',
+    baseCost: 6000, growth: 1, max: 1, mods: [{ stat: 'tycoon.speed', op: 'mult', value: 1.03 }], prop: 'cables', phase: 'bedroom' },
+  { id: 'monitor_arm', name: 'Monitor Arm', desc: '+4% game speed. Ergonomic flex.', icon: '🦾', category: 'hardware',
+    baseCost: 14000, growth: 1, max: 1, mods: [{ stat: 'tycoon.speed', op: 'mult', value: 1.04 }], prop: 'monarm', phase: 'bedroom' },
+  { id: 'side_desk', name: 'Flat-Pack Side Desk', desc: '+5% game speed. Three screws left over.', icon: '🪵', category: 'furniture',
+    baseCost: 30000, growth: 1, max: 1, mods: [{ stat: 'tycoon.speed', op: 'mult', value: 1.05 }], prop: 'sidedesk', phase: 'bedroom' },
+  { id: 'ring_light', name: 'Ring Light', desc: '+4% exchange rate. You look *professional*.', icon: '⭕', category: 'utility',
+    baseCost: 8000, growth: 4, max: 2, mods: [{ stat: 'exchange.rate', op: 'mult', value: 1.04 }], prop: 'ringlight', phase: 'bedroom' },
+  { id: 'blue_glasses', name: 'Blue-Light Glasses', desc: '+3% exchange rate. You can see money better.', icon: '👓', category: 'utility',
+    baseCost: 12000, growth: 1, max: 1, mods: [{ stat: 'exchange.rate', op: 'mult', value: 1.03 }], prop: 'glasses', phase: 'bedroom' },
+  { id: 'podcast_mic', name: 'Podcast Microphone', desc: '+5% exchange rate. Your takes are now *content*.', icon: '🎙️', category: 'hardware',
+    baseCost: 45000, growth: 1, max: 1, mods: [{ stat: 'exchange.rate', op: 'mult', value: 1.05 }], prop: 'mic', phase: 'bedroom' },
+  { id: 'plan_board', name: 'Whiteboard of Plans', desc: '+3% exchange, +2% speed. Step 3: profit.', icon: '📋', category: 'furniture',
+    baseCost: 60000, growth: 1, max: 1, mods: [{ stat: 'exchange.rate', op: 'mult', value: 1.03 }, { stat: 'tycoon.speed', op: 'mult', value: 1.02 }], prop: 'whiteboard', phase: 'bedroom' },
+  { id: 'energy_fridge', name: 'Mini Fridge of Energy Drinks', desc: 'Grind Tokens need 8% fewer actions.', icon: '🥤', category: 'furniture',
+    baseCost: 2600, growth: 3, max: 2, mods: [{ stat: 'grind.threshold', op: 'mult', value: 0.92 }], prop: 'fridge', phase: 'bedroom' },
+  { id: 'coin_vac', name: 'Handheld Coin Vac', desc: '+0.75 m coin pickup radius.', icon: '🧹', category: 'utility',
+    baseCost: 700, growth: 3, max: 3, mods: [{ stat: 'magnet.radius', op: 'add', value: 0.75 }], prop: 'coinvac', phase: 'bedroom' },
+  { id: 'coin_sorter', name: 'Coin Sorting Tray', desc: '+4% cash from every coin you pick up.', icon: '🪙', category: 'utility',
+    baseCost: 20000, growth: 3, max: 3, mods: [{ stat: 'pickup.mult', op: 'mult', value: 1.04 }], prop: 'sorter', phase: 'bedroom' },
+  { id: 'ups_battery', name: 'UPS Battery Box', desc: '+15% offline earning efficiency.', icon: '🔋', category: 'utility',
+    baseCost: 1800, growth: 3, max: 2, mods: [{ stat: 'offline.rate', op: 'add', value: 0.15 }], prop: 'ups', phase: 'bedroom' },
+  { id: 'server_rack', name: 'Second-hand Server Rack', desc: '+50% offline time cap. Extremely loud.', icon: '🗄️', category: 'hardware',
+    baseCost: 15000, growth: 1, max: 1, mods: [{ stat: 'offline.cap', op: 'mult', value: 1.5 }], prop: 'server', phase: 'bedroom' },
+  { id: 'clothes_rail', name: 'Clothing Rail', desc: '+1 cosmetic modifier slot per target.', icon: '👕', category: 'furniture',
+    baseCost: 25000, growth: 8, max: 2, mods: [{ stat: 'cosmetic.slots', op: 'add', value: 1 }], prop: 'rail', phase: 'bedroom' },
+  { id: 'power_strip', name: 'Daisy-Chained Power Strip', desc: '+1 game slot. Fire hazard (cosmetic).', icon: '🔌', category: 'hardware',
+    baseCost: 250000, growth: 1, max: 1, mods: [{ stat: 'slots', op: 'add', value: 1 }], prop: 'powerstrip', phase: 'bedroom' },
   { id: 'garage_key', name: 'Garage Key', desc: 'Unlocks the Garage. (Phase 2 coming soon!)', icon: '🔑', category: 'key',
     baseCost: 1200000, growth: 1, max: 1, mods: [], phase: 'bedroom' },
 ];
 
-export const itemById = (id: string): ItemDef | undefined => ITEMS.find((i) => i.id === id);
+/** Every purchasable item: eBuy stock plus Junk Mart decor. */
+export const ALL_ITEMS: ItemDef[] = [...ITEMS, ...DECOR_ITEMS];
+const byId = new Map(ALL_ITEMS.map((i) => [i.id, i]));
+
+export const itemById = (id: string): ItemDef | undefined => byId.get(id);

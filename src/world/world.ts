@@ -11,6 +11,7 @@ import { Cash } from './cash';
 import { Avatar } from './avatar';
 import { createProp, spawnToy } from './props';
 import { Sfx } from './audio';
+import { CosmeticFx } from './cosmeticFx';
 
 interface ScreenEntry {
   os: TycoonOS;
@@ -48,6 +49,7 @@ export class World {
   private spinners: THREE.Object3D[] = [];
   private tpPos = new THREE.Vector3();
   private tpQuat = new THREE.Quaternion();
+  private fx?: CosmeticFx;
 
   private constructor(
     readonly canvas: HTMLCanvasElement,
@@ -77,6 +79,7 @@ export class World {
     const cash = new Cash(phys, scene);
     const avatar = new Avatar(phys, scene, new THREE.Vector3(0.3, 1, 0.6));
     const w = new World(canvas, game, host, phys, room, cash, avatar, renderer);
+    w.fx = new CosmeticFx({ game, phys, cash, roots: (t) => w.targetObjects(t), bodies: (t) => w.targetBodies(t) });
     // move built content into the world's scene
     while (scene.children.length) w.scene.add(scene.children[0]!);
     w.setupLights();
@@ -266,6 +269,7 @@ export class World {
           if (!jelly) o.mesh.scale.set(1, 1, 1);
         }
     }
+    this.fx?.apply();
   }
 
   /* ------------------------------------------------------------ input */
@@ -424,6 +428,7 @@ export class World {
     );
     this.detectChaos(dt, fast);
     this.jelly(dt, comfort);
+    this.fx?.update(dt, this.time);
     for (const s of this.spinners) s.rotation.y += dt * 25;
 
     // Screens
