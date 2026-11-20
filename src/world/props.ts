@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Physics, PhysObj } from './physics';
 import { buildMonitor, mat, rbox, shadowed, ROOM } from './room';
 import { fabric, posterTex } from './textures';
+import { createRecipeProp, hasRecipe } from './decor/factory';
 
 export interface PropResult {
   obj?: PhysObj;
@@ -34,7 +35,18 @@ export function propSlot(prop: string, index: number): THREE.Vector3 {
 
 const POSTERS: [string, string, string][] = [['HUSTLE', '#e63946', '#f1faee'], ['STONKS', '#2a9d8f', '#ffffff'], ['NO\nSLEEP', '#111', '#ffcc00'], ['VIBES', '#7b2cbf', '#fff']];
 
+/** Every fixed slot position, so recipe props (decor, gear) avoid spawning on top of them. */
+export const reservedSpots = (): THREE.Vector3[] => Object.values(SLOTS).flat();
+
+/** True when createProp knows how to build `prop`. */
+export const isKnownProp = (prop: string): boolean => prop in SLOTS || hasRecipe(prop);
+
 export function createProp(prop: string, index: number, scene: THREE.Scene, phys: Physics, deskY: number): PropResult {
+  // Data-driven props: Junk Mart decor (`decor:<id>`) and newer eBuy gear.
+  if (hasRecipe(prop)) {
+    const r = createRecipeProp(prop, index, scene, phys, deskY, reservedSpots());
+    return r ? { obj: r.obj, light: r.light } : {};
+  }
   const R = phys.R;
   const at = propSlot(prop, index);
   const body = (pos: THREE.Vector3Like, rotY = 0) => phys.createBody({ pos, rot: new THREE.Euler(0, rotY, 0), angularDamping: 0.6 });

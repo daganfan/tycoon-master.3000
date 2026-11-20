@@ -9,6 +9,7 @@ import type { CosmeticTarget, TokenCost, ItemCategory } from '@/sim/types';
 import type { OsApp } from '../os';
 import { splitH, splitV, type Rect, type Ui } from '../ui';
 import { VIEWS } from './views';
+import { junkMart } from './junkmart';
 
 const scrolls = new Map<string, number>();
 
@@ -101,8 +102,9 @@ const ebuy: OsApp = {
   icon: '🛒',
   draw(ui, r, os) {
     const game = os.game;
+    const tw = Math.min(112, (r.w - 6 * (CATS.length - 1)) / CATS.length);
     CATS.forEach((c, i) => {
-      if (ui.button({ x: r.x + i * 118, y: r.y, w: 112, h: 34 }, c.label, { primary: shopCat === c.id, size: 14 })) shopCat = c.id;
+      if (ui.button({ x: r.x + i * (tw + 6), y: r.y, w: tw, h: 34 }, c.label, { primary: shopCat === c.id, size: tw < 80 ? 11 : 14 })) shopCat = c.id;
     });
     const items = ITEMS.filter((i) => shopCat === 'all' || i.category === shopCat);
     list(ui, 'ebuy', { x: r.x, y: r.y + 44, w: r.w, h: r.h - 44 }, items, 78, (it, rr) => {
@@ -237,28 +239,55 @@ const TARGETS: { id: CosmeticTarget; label: string }[] = [
 ];
 let wardrobeTarget: CosmeticTarget = 'props';
 
+const RARITIES = ['all', 'common', 'rare', 'epic', 'legendary', 'glitched'] as const;
+const RARITY_ORDER: Record<string, number> = { common: 0, rare: 1, epic: 2, legendary: 3, glitched: 4 };
+const RARITY_COL: Record<string, string> = { common: '#9aa0a6', rare: '#3b82f6', epic: '#a855f7', legendary: '#f59e0b', glitched: '#10b981' };
+let wardrobeRarity: (typeof RARITIES)[number] = 'all';
+let wardrobeSort: 'rarity' | 'owned' | 'name' = 'rarity';
+
 const wardrobe: OsApp = {
   id: 'wardrobe',
   title: 'Drip Shop',
   icon: '🎨',
   draw(ui, r, os) {
     const g = os.game;
+    const tw = Math.min(90, (r.w - 6 * (TARGETS.length - 1)) / TARGETS.length);
     TARGETS.forEach((t, i) => {
-      if (ui.button({ x: r.x + i * 96, y: r.y, w: 90, h: 34 }, t.label, { primary: wardrobeTarget === t.id, size: 14 })) wardrobeTarget = t.id;
+      if (ui.button({ x: r.x + i * (tw + 6), y: r.y, w: tw, h: 34 }, t.label, { primary: wardrobeTarget === t.id, size: tw < 70 ? 12 : 14 })) wardrobeTarget = t.id;
     });
     const eq = g.state.cosmetics.equipped[wardrobeTarget];
-    ui.text(`Modifier slots: ${eq?.mods.length ?? 0}/${Math.floor(g.stat('cosmetic.slots'))}`, r.x, r.y + 52, { size: 14, color: ui.theme.muted });
-    const items = COSMETICS.filter((c) => c.targets.includes(wardrobeTarget));
-    const rarityCol: Record<string, string> = { common: '#9aa0a6', rare: '#3b82f6', epic: '#a855f7', legendary: '#f59e0b', glitched: '#10b981' };
-    list(ui, 'ward', { x: r.x, y: r.y + 70, w: r.w, h: r.h - 70 }, items, 74, (c, rr) => {
-      const owned = g.state.cosmetics.owned.includes(c.id);
+    // Filter / sort row
+    const fy = r.y + 42;
+    const bw = Math.min(150, (r.w - 12) / 3);
+    const rl = wardrobeRarity === 'all' ? 'All rarities' : wardrobeRarity[0]!.toUpperCase() + wardrobeRarity.slice(1);
+    if (ui.button({ x: r.x, y: fy, w: bw, h: 30 }, `◆ ${rl}`, { size: 13, textColor: wardrobeRarity === 'all' ? undefined : RARITY_COL[wardrobeRarity] }))
+      wardrobeRarity = RARITIES[(RARITIES.indexOf(wardrobeRarity) + 1) % RARITIES.length]!;
+    const sorts = { rarity: 'Sort: rarity', owned: 'Sort: owned', name: 'Sort: A–Z' } as const;
+    if (ui.button({ x: r.x + bw + 6, y: fy, w: bw, h: 30 }, sorts[wardrobeSort], { size: 13 }))
+      wardrobeSort = wardrobeSort === 'rarity' ? 'owned' : wardrobeSort === 'owned' ? 'name' : 'rarity';
+    ui.text(`Mod slots ${eq?.mods.length ?? 0}/${Math.floor(g.stat('cosmetic.slots'))}`, r.x + r.w, fy + 15, { size: 13, color: ui.theme.muted, align: 'right', maxWidth: r.w - 2 * bw - 16 });
+    const owned = (id: string) => g.state.cosmetics.owned.includes(id);
+    const items = COSMETICS.filter((c) => c.targets.includes(wardrobeTarget) && (wardrobeRarity === 'all' || c.rarity === wardrobeRarity)).sort((a, b) =>
+      wardrobeSort === 'name'
+        ? a.name.localeCompare(b.name)
+        : wardrobeSort === 'owned'
+          ? Number(owned(b.id)) - Number(owned(a.id)) || RARITY_ORDER[a.rarity]! - RARITY_ORDER[b.rarity]!
+          : RARITY_ORDER[a.rarity]! - RARITY_ORDER[b.rarity]! || a.name.localeCompare(b.name),
+    );
+    const listR = { x: r.x, y: r.y + 80, w: r.w, h: r.h - 80 };
+    if (!items.length) ui.text('Nothing here with this filter.', r.x + r.w / 2, listR.y + 40, { size: 15, color: ui.theme.muted, align: 'center' });
+    list(ui, 'ward', listR, items, 74, (c, rr) => {
+      const has = owned(c.id);
       const on = eq?.skin === c.id || !!eq?.mods.includes(c.id);
+      const narrow = rr.w < 460;
+      const bwid = narrow ? 96 : 134;
       ui.rect(rr, on ? 'rgba(80,200,120,0.25)' : 'rgba(0,0,0,0.06)', 6);
-      ui.rect({ x: rr.x, y: rr.y, w: 6, h: rr.h }, rarityCol[c.rarity]!, 3);
-      ui.text(`${c.name}`, rr.x + 18, rr.y + 20, { size: 16, bold: true });
-      ui.text(`${c.kind === 'skin' ? 'Skin' : 'Modifier'} · ${c.rarity} · ${c.desc}`, rr.x + 18, rr.y + 46, { size: 12, color: ui.theme.muted, maxWidth: rr.w - 170 });
-      const b = { x: rr.x + rr.w - 140, y: rr.y + 12, w: 134, h: rr.h - 24 };
-      if (!owned) {
+      ui.rect({ x: rr.x, y: rr.y, w: 6, h: rr.h }, RARITY_COL[c.rarity]!, 3);
+      const badge = on ? '  ✅ Equipped' : has ? '  · Owned' : '';
+      ui.text(`${c.name}${badge}`, rr.x + 16, rr.y + 20, { size: narrow ? 14 : 16, bold: true, maxWidth: rr.w - bwid - 28 });
+      ui.text(`${c.kind === 'skin' ? 'Skin' : 'Modifier'} · ${c.rarity} · ${c.desc}`, rr.x + 16, rr.y + 46, { size: 12, color: ui.theme.muted, maxWidth: rr.w - bwid - 28 });
+      const b = { x: rr.x + rr.w - bwid - 6, y: rr.y + 12, w: bwid, h: rr.h - 24 };
+      if (!has) {
         const cost = g.cosmeticCost(c.id);
         if (ui.button(b, costLabel(cost), { disabled: !g.canAfford(cost), primary: true, size: 14 })) g.buyCosmetic(c.id);
       } else if (ui.button(b, on ? 'Unequip' : 'Equip', { size: 14 })) g.equip(wardrobeTarget, c.id);
@@ -307,4 +336,4 @@ const settings: OsApp = {
   },
 };
 
-export const builtinApps: OsApp[] = [ebuy, appStore, skills, wardrobe, wallet, mail, taskmgr, settings];
+export const builtinApps: OsApp[] = [ebuy, junkMart, appStore, skills, wardrobe, wallet, mail, taskmgr, settings];

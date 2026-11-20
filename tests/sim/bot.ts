@@ -58,7 +58,7 @@ export function runBot(maxSeconds: number, clicksPerSecond = 3, seed = 42): BotR
     simulateMayhem(g, t);
     for (const def of TYCOONS) if (g.canUnlockTycoon(def.id)) g.unlockTycoon(def.id);
     for (const id of Object.keys(g.state.tycoons)) g.setRunning(id, true);
-    const nextUnlock = TYCOONS.find((d) => !g.state.tycoons[d.id])?.unlockCost ?? 1200000;
+    const nextUnlock = TYCOONS.find((d) => !g.state.tycoons[d.id])?.unlockCost ?? 2000000;
     const budget = g.state.cash.toNumber() - nextUnlock * 0.5;
     const items = ITEMS.filter((i) => i.id !== 'garage_key' && g.canBuyItem(i.id)).sort((a, b) => g.itemCost(a.id).cmp(g.itemCost(b.id)));
     for (const i of items) if (g.itemCost(i.id).toNumber() <= Math.max(budget, g.state.cash.toNumber() * 0.25)) g.buyItem(i.id);
