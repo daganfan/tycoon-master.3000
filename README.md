@@ -6,6 +6,15 @@ You start out broke, with nothing but a crusty old PC. You play tycoon games to 
 
 > 🚧 **Status: playable prototype.** The Bedroom phase is playable: 4 mini-tycoons inside TycoonOS, physical cash, tokens, a 27-node skill tree, shop, cosmetics and saves.
 
+## Play / Share / Install
+
+- **Play in the browser:** https://daganfan.github.io/tycoon-master.3000/ (once GitHub Pages is switched on, see below). Works in Chrome, Edge, Firefox and Safari, on desktop and mobile, and keeps working offline after the first visit.
+- **Install it as an app:** use the **Install** icon in the address bar (Chrome/Edge), **Add to Home Screen** (iPhone/iPad/Android) or **File → Add to Dock** (Safari on Mac).
+- **Desktop downloads:** Windows installer/portable `.exe`, Mac `.dmg` and Linux AppImage are built by the **Desktop builds** workflow in the Actions tab.
+- **Share elsewhere:** `npm run package:web` makes a zip ready for itch.io or Netlify.
+
+👉 Step-by-step guide (no coding needed): **[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)**
+
 ## Highlights
 
 - 🎮 **Nested gameplay:** play original mini-tycoons inside **TycoonOS** on in-world screens, and their profits fund your real empire. 30 games planned (~20 hours).
@@ -22,6 +31,7 @@ You start out broke, with nothing but a crusty old PC. You play tycoon games to 
 | [Game Design Document](docs/GAME_DESIGN.md) | Full concept: loop, economy, tokens, skill tree, style, physics, MVP scope |
 | [Implementation Plan](docs/IMPLEMENTATION_PLAN.md) | MVP architecture, systems, milestones, tests, risks |
 | [Roadmap](docs/ROADMAP.md) | Milestones from prototype to release |
+| [Sharing & Installing](docs/DISTRIBUTION.md) | Web link, installable app, desktop downloads, itch.io |
 | [Contributing](CONTRIBUTING.md) | Branching, commits and conventions |
 | [Changelog](CHANGELOG.md) | Notable changes |
 
@@ -42,6 +52,9 @@ npm run dev        # http://localhost:5173
 | `npm run e2e` | Browser smoke test (Playwright) |
 | `npm run balance` | Print a simulated bot playthrough |
 | `npm run check` | Typecheck + lint + tests + build |
+| `npm run package:web` | Zip the web build for itch.io / Netlify |
+| `npm run desktop` | Run the desktop (Electron) app locally |
+| `npm run desktop:build` | Package desktop installers into `release/` |
 
 Add `?fresh` to the URL to start a new game without touching your save.
 

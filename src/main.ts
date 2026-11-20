@@ -1,3 +1,4 @@
+import './polyfills';
 import { mount } from 'svelte';
 import { FixedLoop } from '@/core/loop';
 import { formatCash } from '@/core/num';
@@ -7,6 +8,8 @@ import { IdbStore, MemoryStore, exportSave, importSave, readSave, writeSave, typ
 import type { OsHost } from '@/os/os';
 import App from '@/ui/App.svelte';
 import { ui } from '@/ui/store.svelte';
+import { hasWebGL2, showFatal } from './bootGuard';
+import { registerPwa } from './pwa';
 
 const AUTOSAVE_SECONDS = 30;
 
@@ -101,7 +104,14 @@ async function boot(): Promise<void> {
   (window as unknown as { __tm: unknown }).__tm = { game, world, save };
 }
 
-boot().catch((e) => {
-  console.error(e);
-  ui.loading = `Something broke: ${(e as Error).message}`;
-});
+void registerPwa(async () => (window as unknown as { __tm?: { save(): Promise<void> } }).__tm?.save());
+
+if (!hasWebGL2()) {
+  showFatal("Your browser can't show the game's 3D graphics", 'WebGL 2 is not available.');
+} else {
+  boot().catch((e) => {
+    console.error(e);
+    ui.loading = `Something broke: ${(e as Error).message}`;
+    showFatal('Tycoon Master 3000 failed to start', (e as Error).message);
+  });
+}

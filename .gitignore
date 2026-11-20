@@ -29,3 +29,7 @@ test-results/
 
 # Agent worktrees
 .claude/worktrees/
+
+# Packaged builds (web zip, desktop installers)
+release/
+dist-electron/
