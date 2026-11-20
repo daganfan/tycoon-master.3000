@@ -9,8 +9,9 @@ import { QUESTS } from '@/content/quests';
 import { TYCOONS, tycoonById } from './tycoons';
 import { createRuntime, upgradeCost, xpForLevel } from './tycoons/framework';
 import { BASE_STATS, createInitialState } from './state';
+import { GarageSim, type PayoutSource } from './garage/factory';
 import type {
-  ChaosInfo, ChaosKind, CosmeticTarget, GameState, TokenCost, TokenId, TycoonCtx, TycoonDef, TycoonRuntime,
+  ChaosInfo, ChaosKind, CosmeticTarget, GameState, Phase, TokenCost, TokenId, TycoonCtx, TycoonDef, TycoonRuntime,
 } from './types';
 
 export interface GameEvents extends Record<string, unknown> {
@@ -27,6 +28,9 @@ export interface GameEvents extends Record<string, unknown> {
   tycoonInstalled: { id: string };
   respec: Record<string, never>;
   chaos: { kind: ChaosKind; points: number; meter: number; need: number };
+  garagePad: { id: string };
+  garagePayout: { amount: Num; source: PayoutSource };
+  garageRebirth: { stars: number };
 }
 
 /** Base Chaos Meter points per unit of magnitude, and the cap for a single event. */
@@ -46,6 +50,8 @@ export class Game {
   readonly bus = new EventBus<GameEvents>();
   readonly stats = new Stats(BASE_STATS);
   readonly rng: Rng;
+  /** Phase 2: the physical factory in the garage. */
+  readonly garage = new GarageSim(this);
   /** Which tycoon the player is currently focused on (runtime only). */
   focused: string | null = null;
   private ctxCache = new Map<string, TycoonCtx>();
@@ -146,6 +152,7 @@ export class Game {
         for (const rt of this.running()) if (rt.money > 0) this.cashOut(rt.id);
       }
     }
+    this.garage.tick(dt);
     this.checkLevels();
     this.checkQuests();
     s.rngState = this.rng.state;
@@ -332,9 +339,14 @@ export class Game {
     return num(Math.ceil(def.baseCost * Math.pow(def.growth, owned) * this.stat('shop.discount')));
   }
 
+  /** Has the player reached this phase (bought its key)? */
+  phaseOpen(phase: Phase): boolean {
+    return phase === 'bedroom' || this.state.flags.includes(`phase:${phase}`);
+  }
+
   canBuyItem(id: string): boolean {
     const def = itemById(id);
-    if (!def) return false;
+    if (!def || !this.phaseOpen(def.phase)) return false;
     return (this.state.items[id] ?? 0) < def.max && this.state.cash.gte(this.itemCost(id));
   }
 
@@ -344,6 +356,10 @@ export class Game {
     this.state.cash = this.state.cash.sub(this.itemCost(id));
     const count = (this.state.items[id] = (this.state.items[id] ?? 0) + 1);
     this.stats.setSource(`item:${id}`, scaleMods(def.mods, count), def.flags ?? []);
+    if (id === 'garage_key') {
+      this.setFlag('phase:garage');
+      this.bus.emit('notify', { text: '🔑 The Garage is open! Walk through the bedroom door.', tone: 'good' });
+    }
     this.bus.emit('itemBought', { id, count });
     return true;
   }
@@ -360,7 +376,7 @@ export class Game {
 
   canUnlockTycoon(id: string): boolean {
     const def = TYCOONS.find((t) => t.id === id);
-    if (!def || this.state.tycoons[id]) return false;
+    if (!def || this.state.tycoons[id] || !this.phaseOpen(def.phase)) return false;
     return this.state.cash.gte(def.unlockCost);
   }
 
@@ -541,7 +557,7 @@ export class Game {
     for (let t = 0; t < simulated; t += step) {
       for (const rt of this.running()) tycoonById(rt.id).tick(rt.state, rt, Math.min(step, simulated - t), this.ctx(rt));
     }
-    let cash = num(0);
+    let cash = this.garage.offline(simulated);
     if (this.flag('autoCashout')) for (const rt of this.running()) cash = cash.add(this.cashOut(rt.id));
     this.checkLevels();
     return { seconds: capped, cash };

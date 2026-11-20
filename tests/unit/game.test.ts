@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Game } from '@/sim/game';
-import { createInitialState } from '@/sim/state';
+import { SAVE_VERSION, createInitialState } from '@/sim/state';
 import { num } from '@/core/num';
 import { MemoryStore, deserialize, exportSave, importSave, readSave, serialize, writeSave } from '@/sim/save';
 
@@ -235,7 +235,7 @@ describe('Save migration', () => {
     delete raw.layout;
     raw.counters = { cd_topple: 99, manual: 5 };
     const back = deserialize(JSON.stringify(raw));
-    expect(back.version).toBe(2);
+    expect(back.version).toBe(SAVE_VERSION);
     expect(back.layout).toEqual({});
     expect(back.counters.cd_topple).toBeUndefined();
     expect(back.counters.manual).toBe(5);

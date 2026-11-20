@@ -1,5 +1,6 @@
 import type { ItemDef } from '@/sim/types';
 import { DECOR_ITEMS } from './decor';
+import { GARAGE_ITEMS } from './garage';
 
 /** Bedroom shop ("eBuy"). Stat modifiers are per unit owned. */
 export const ITEMS: ItemDef[] = [
@@ -64,8 +65,9 @@ export const ITEMS: ItemDef[] = [
     baseCost: 25000, growth: 8, max: 2, mods: [{ stat: 'cosmetic.slots', op: 'add', value: 1 }], prop: 'rail', phase: 'bedroom' },
   { id: 'power_strip', name: 'Daisy-Chained Power Strip', desc: '+1 game slot. Fire hazard (cosmetic).', icon: '🔌', category: 'hardware',
     baseCost: 250000, growth: 1, max: 1, mods: [{ stat: 'slots', op: 'add', value: 1 }], prop: 'powerstrip', phase: 'bedroom' },
-  { id: 'garage_key', name: 'Garage Key', desc: 'Unlocks the Garage. (Phase 2 coming soon!)', icon: '🔑', category: 'key',
+  { id: 'garage_key', name: 'Garage Key', desc: 'Unlocks the Garage: a physical scrap factory, new games and more room.', icon: '🔑', category: 'key',
     baseCost: 2000000, growth: 1, max: 1, mods: [], phase: 'bedroom' },
+  ...GARAGE_ITEMS,
 ];
 
 /** Every purchasable item: eBuy stock plus Junk Mart decor. */
