@@ -1,12 +1,13 @@
 import * as THREE from 'three';
-import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import type { Game } from '@/sim/game';
 import { itemById } from '@/content/items';
 import { cosmeticById } from '@/content/cosmetics';
 import type { CosmeticTarget, PhysicsPatch } from '@/sim/types';
 import { TycoonOS, type OsHost } from '@/os/os';
 import { initRapier, Physics, type PhysObj } from './physics';
-import { buildRoom, mat, ROOM, type RoomRefs } from './room';
+import { buildRoom, ROOM, type RoomRefs } from './room';
+import { Graphics, type Quality } from './render';
+import { Lighting } from './lighting';
 import { Cash } from './cash';
 import { Avatar } from './avatar';
 import { createProp, spawnToy } from './props';
@@ -35,6 +36,8 @@ export class World {
   readonly screens: ScreenEntry[] = [];
   readonly props: PhysObj[] = [];
   hint = '';
+  gfx!: Graphics;
+  lighting: Lighting | null = null;
   focus: ScreenEntry | null = null;
   onFocusChange: (focused: boolean) => void = () => {};
   private focusBlend = 0;
@@ -64,19 +67,15 @@ export class World {
 
   static async create(canvas: HTMLCanvasElement, game: Game, host: OsHost): Promise<World> {
     const R = await initRapier();
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: false });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.05;
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFShadowMap;
+    const gfx = new Graphics(canvas);
+    const renderer = gfx.renderer;
     const phys = new Physics(R);
     const scene = new THREE.Scene();
     const room = buildRoom(scene, phys);
     const cash = new Cash(phys, scene);
     const avatar = new Avatar(phys, scene, new THREE.Vector3(0.3, 1, 0.6));
     const w = new World(canvas, game, host, phys, room, cash, avatar, renderer);
+    w.gfx = gfx;
     // move built content into the world's scene
     while (scene.children.length) w.scene.add(scene.children[0]!);
     w.setupLights();
@@ -93,35 +92,10 @@ export class World {
   /* ------------------------------------------------------------ setup */
 
   private setupLights(): void {
-    const pmrem = new THREE.PMREMGenerator(this.renderer);
-    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    this.scene.environmentIntensity = 0.35;
-    this.scene.background = new THREE.Color('#1a1d24');
-    const sun = new THREE.DirectionalLight('#fff1d6', 3.2);
-    sun.position.set(7, 4.2, 1.2);
-    sun.target.position.set(-0.5, 0.4, 0.2);
-    sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.left = -4;
-    sun.shadow.camera.right = 4;
-    sun.shadow.camera.top = 4;
-    sun.shadow.camera.bottom = -4;
-    sun.shadow.camera.near = 1;
-    sun.shadow.camera.far = 16;
-    sun.shadow.bias = -0.0004;
-    sun.shadow.normalBias = 0.02;
-    this.scene.add(sun, sun.target);
-    const ceiling = new THREE.PointLight('#ffd9a8', 6, 8, 1.6);
-    ceiling.position.set(0, ROOM.h - 0.25, 0);
-    ceiling.castShadow = true;
-    ceiling.shadow.mapSize.set(1024, 1024);
-    ceiling.shadow.bias = -0.002;
-    this.scene.add(ceiling);
-    const fixture = new THREE.Mesh(new THREE.SphereGeometry(0.16, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2), mat('#fff8ec', 0.3, 0, { emissive: '#ffe2b8', emissiveIntensity: 1.2, side: THREE.DoubleSide }));
-    fixture.position.set(0, ROOM.h - 0.02, 0);
-    fixture.rotation.x = Math.PI;
-    this.scene.add(fixture);
-    this.scene.add(new THREE.HemisphereLight('#cfe4ff', '#5a4632', 0.35));
+    this.lighting = new Lighting(this.scene, this.gfx, this.room, () => this.screens[0]?.os.canvas);
+    this.gfx.setQuality(this.game.state.settings.quality ?? 'auto');
+    this.gfx.attach(this.scene, this.camera);
+    this.avatar.lookTarget = this.camera.position;
   }
 
   private addScreen(mesh: THREE.Mesh, obj: PhysObj, w: number, h: number, label: string): ScreenEntry {
@@ -393,7 +367,7 @@ export class World {
   resize(): void {
     const w = this.canvas.clientWidth || window.innerWidth;
     const h = this.canvas.clientHeight || window.innerHeight;
-    this.renderer.setSize(w, h, false);
+    this.gfx.resize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
@@ -452,7 +426,9 @@ export class World {
         : 'WASD move · Shift sprint · Space jump · F flop · drag to look · T skill tree';
 
     this.updateCamera(dt);
-    this.renderer.render(this.scene, this.camera);
+    this.gfx.setQuality((this.game.state.settings.quality ?? 'auto') as Quality);
+    this.gfx.setFocus(this.focusBlend);
+    this.gfx.render(dt);
   }
 
   private detectChaos(dt: number, fastCoins: number): void {

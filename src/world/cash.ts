@@ -1,8 +1,85 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import { num, type Num } from '@/core/num';
 import type { PhysicsPatch } from '@/sim/types';
 import type { Physics } from './physics';
+import { bagAtlas, billAtlas, coinMaps } from './textures';
+
+/** Coin: cylinder whose caps use the embossed face and whose edge uses the reeding strip. */
+function coinGeometry(): THREE.BufferGeometry {
+  const g = new THREE.CylinderGeometry(0.035, 0.035, 0.009, 36, 1);
+  const n = g.attributes.normal as THREE.BufferAttribute;
+  const uv = g.attributes.uv as THREE.BufferAttribute;
+  for (let i = 0; i < uv.count; i++) if (Math.abs(n.getY(i)) < 0.5) uv.setXY(i, uv.getX(i) * 0.12, 0.962 + uv.getY(i) * 0.036);
+  return g;
+}
+
+/** Remap a box's per-face UVs into atlas rows: [x0, y0, x1, y1] per face index (+x,-x,+y,-y,+z,-z). */
+function atlasBox(w: number, h: number, d: number, rects: [number, number, number, number][]): THREE.BufferGeometry {
+  const g = new THREE.BoxGeometry(w, h, d);
+  const uv = g.attributes.uv as THREE.BufferAttribute;
+  for (let i = 0; i < uv.count; i++) {
+    const r = rects[Math.floor(i / 4)]!;
+    uv.setXY(i, r[0] + uv.getX(i) * (r[2] - r[0]), r[1] + uv.getY(i) * (r[3] - r[1]));
+  }
+  return g;
+}
+
+/** Bundle of notes with a paper band (rows: 0.5..1 face, 0.25..0.5 edges, 0..0.25 band). */
+function billGeometry(): THREE.BufferGeometry {
+  const FACE: [number, number, number, number] = [0, 0.5, 1, 1];
+  const EDGE: [number, number, number, number] = [0, 0.27, 1, 0.48];
+  const BAND: [number, number, number, number] = [0, 0.02, 1, 0.23];
+  const stack = atlasBox(0.15, 0.025, 0.07, [EDGE, EDGE, FACE, FACE, EDGE, EDGE]);
+  const band = atlasBox(0.034, 0.0262, 0.0712, [BAND, BAND, BAND, BAND, BAND, BAND]);
+  return mergeGeometries([stack, band], false)!;
+}
+
+/** Money bag: lathed sack with a pinched neck, ruffled top and a rope tie. */
+function bagGeometry(): THREE.BufferGeometry {
+  const pts: THREE.Vector2[] = [];
+  const prof = [
+    [0.001, -0.125],
+    [0.06, -0.122],
+    [0.1, -0.1],
+    [0.118, -0.05],
+    [0.115, 0.01],
+    [0.095, 0.06],
+    [0.055, 0.095],
+    [0.035, 0.11],
+    [0.045, 0.125],
+    [0.07, 0.15],
+    [0.055, 0.16],
+    [0.03, 0.15],
+    [0.001, 0.142],
+  ];
+  for (const [r, y] of prof) pts.push(new THREE.Vector2(r!, y!));
+  const sack = new THREE.LatheGeometry(pts, 28);
+  // wobble the ruffle and squash the sack slightly so it looks soft
+  const p = sack.attributes.position as THREE.BufferAttribute;
+  const uv = sack.attributes.uv as THREE.BufferAttribute;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i);
+    const y = p.getY(i);
+    const z = p.getZ(i);
+    const a = Math.atan2(z, x);
+    const ruffle = y > 0.12 ? 1 + 0.18 * Math.sin(a * 9) : 1 + 0.02 * Math.sin(a * 3 + y * 20);
+    p.setXYZ(i, x * ruffle, y, z * ruffle * 0.92);
+    uv.setXY(i, uv.getX(i), 0.2 + uv.getY(i) * 0.8);
+  }
+  sack.computeVertexNormals();
+  const tie = new THREE.TorusGeometry(0.04, 0.011, 8, 24);
+  tie.rotateX(Math.PI / 2);
+  tie.translate(0, 0.107, 0);
+  const tuv = tie.attributes.uv as THREE.BufferAttribute;
+  for (let i = 0; i < tuv.count; i++) tuv.setXY(i, tuv.getX(i), tuv.getY(i) * 0.18);
+  const knot = new THREE.SphereGeometry(0.018, 10, 8).translate(0.0, 0.107, -0.045);
+  const kuv = knot.attributes.uv as THREE.BufferAttribute;
+  for (let i = 0; i < kuv.count; i++) kuv.setXY(i, kuv.getX(i), kuv.getY(i) * 0.18);
+  const parts = [sack, tie, knot].map((g) => (g.index ? g.toNonIndexed() : g));
+  return mergeGeometries(parts, false)!;
+}
 
 /** 0 = coin, 1 = bill bundle, 2 = money bag. */
 type Kind = 0 | 1 | 2;
@@ -38,16 +115,15 @@ export class Cash {
     private readonly phys: Physics,
     scene: THREE.Scene,
   ) {
+    const coin = coinMaps();
+    const bill = billAtlas();
+    const bag = bagAtlas();
     this.materials = [
-      new THREE.MeshStandardMaterial({ color: '#d9a93a', metalness: 1, roughness: 0.28 }),
-      new THREE.MeshStandardMaterial({ color: '#6aa56a', metalness: 0, roughness: 0.75 }),
-      new THREE.MeshStandardMaterial({ color: '#b08a5a', metalness: 0, roughness: 0.9 }),
+      new THREE.MeshStandardMaterial({ color: '#e0b04a', metalness: 1, roughness: 0.32, roughnessMap: coin.rough, normalMap: coin.normal, normalScale: new THREE.Vector2(1.2, 1.2) }),
+      new THREE.MeshStandardMaterial({ color: '#ffffff', metalness: 0, roughness: 0.8, map: bill.map, normalMap: bill.normal, normalScale: new THREE.Vector2(0.6, 0.6) }),
+      new THREE.MeshStandardMaterial({ color: '#ffffff', metalness: 0, roughness: 0.92, map: bag.map, normalMap: bag.normal }),
     ];
-    const geos = [
-      new THREE.CylinderGeometry(0.035, 0.035, 0.009, 20),
-      new THREE.BoxGeometry(0.15, 0.025, 0.07),
-      new THREE.SphereGeometry(0.11, 18, 14).scale(1, 1.15, 1),
-    ];
+    const geos = [coinGeometry(), billGeometry(), bagGeometry()];
     this.meshes = geos.map((g, i) => {
       const m = new THREE.InstancedMesh(g, this.materials[i]!, CAPS[i as Kind]);
       m.count = 0;

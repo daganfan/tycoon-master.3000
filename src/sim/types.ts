@@ -150,6 +150,8 @@ export interface Settings {
   volume: number;
   wallpaper: number;
   reducedMotion: boolean;
+  /** Graphics preset: auto | low | medium | high | ultra. */
+  quality: 'auto' | 'low' | 'medium' | 'high' | 'ultra';
 }
 
 export interface GameState {
