@@ -26,3 +26,7 @@ Thumbs.db
 coverage/
 playwright-report/
 test-results/
+
+# Packaged builds (web zip, desktop installers)
+release/
+dist-electron/
