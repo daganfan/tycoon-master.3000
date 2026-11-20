@@ -20,6 +20,7 @@ You start out broke, with nothing but a crusty old PC. You play tycoon games to 
 | Doc | What's inside |
 |---|---|
 | [Game Design Document](docs/GAME_DESIGN.md) | Full concept: loop, economy, tokens, skill tree, style, physics, MVP scope |
+| [Implementation Plan](docs/IMPLEMENTATION_PLAN.md) | MVP architecture, systems, milestones, tests, risks |
 | [Roadmap](docs/ROADMAP.md) | Milestones from prototype to release |
 | [Contributing](CONTRIBUTING.md) | Branching, commits and conventions |
 | [Changelog](CHANGELOG.md) | Notable changes |
