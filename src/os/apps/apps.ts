@@ -186,6 +186,7 @@ const wallet: OsApp = {
     for (const [t, v] of Object.entries(s.tokens)) line(`${TOKEN_ICON[t]} ${t[0]!.toUpperCase()}${t.slice(1)} · ${info[t]}`, formatNum(v), 16);
     const need = g.grindNeeded();
     ui.text(`Next Grind Token: ${s.counters.grindProgress ?? 0}/${need} actions`, r.x, y, { size: 14, color: ui.theme.muted });
+    ui.text(`Chaos Meter: ${Math.floor(s.counters.chaosMeter ?? 0)}/${g.chaosNeeded()} (repeat mayhem is worth less)`, r.x, y + 22, { size: 14, color: ui.theme.muted });
   },
 };
 

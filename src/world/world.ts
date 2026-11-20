@@ -11,6 +11,8 @@ import { Cash } from './cash';
 import { Avatar } from './avatar';
 import { createProp, spawnToy } from './props';
 import { Sfx } from './audio';
+import { Interact } from './interact';
+import { ChaosDetector } from './chaos';
 
 interface ScreenEntry {
   os: TycoonOS;
@@ -43,8 +45,8 @@ export class World {
   private drag: { x: number; y: number; moved: boolean; button: number } | null = null;
   private raycaster = new THREE.Raycaster();
   private time = 0;
-  private avalancheT = 0;
-  private towerT = 0;
+  readonly interact: Interact;
+  readonly chaos: ChaosDetector;
   private spinners: THREE.Object3D[] = [];
   private tpPos = new THREE.Vector3();
   private tpQuat = new THREE.Quaternion();
@@ -60,6 +62,23 @@ export class World {
     renderer: THREE.WebGLRenderer,
   ) {
     this.renderer = renderer;
+    this.interact = new Interact(this);
+    this.chaos = new ChaosDetector(game, avatar, (o) => this.interact.busy(o), () => this.sfx.thud());
+    for (const id of ['desk', 'pc', 'monitor', 'chair'] as const) this.interact.register(room[id], id);
+  }
+
+  /** Camera orbit yaw (used by grab/carry to know what's "in front"). */
+  get yaw(): number {
+    return this.cam.yaw;
+  }
+
+  screenMeshes(): THREE.Object3D[] {
+    return this.screens.map((s) => s.mesh);
+  }
+
+  /** Put every piece of furniture and decor back where it belongs. */
+  tidyAll(): number {
+    return this.interact.tidyAll();
   }
 
   static async create(canvas: HTMLCanvasElement, game: Game, host: OsHost): Promise<World> {
@@ -156,7 +175,13 @@ export class World {
   private spawnItem(id: string, index: number): void {
     const def = itemById(id);
     if (!def?.prop) return;
+    const before = this.phys.objs.length;
     const res = createProp(def.prop, index, this.scene, this.phys, this.room.deskTopY);
+    // Stable ids for persistence: the main object is `${id}#${index}`, extras (e.g. a side table) get a suffix.
+    const created = this.phys.objs.slice(before);
+    const main = res.obj ?? created[0];
+    let extra = 0;
+    for (const o of created) this.interact.register(o, o === main ? `${id}#${index}` : `${id}#${index}/${++extra}`);
     if (res.obj) {
       this.props.push(res.obj);
       res.obj.mesh.traverse((o) => o.name === 'spin' && this.spinners.push(o));
@@ -278,14 +303,18 @@ export class World {
       this.keys.add(e.code);
       if (e.code === 'KeyE') this.toggleFocus();
       if (e.code === 'Escape' && this.focus) this.setFocus(null);
-      if (e.code === 'KeyF' && !this.focus && this.avatar.flop()) this.game.reportChaos('ragdoll');
+      if (e.code === 'KeyF' && !this.focus) this.chaos.tryFlop();
+      if (e.code === 'KeyG' && !this.focus) this.interact.toggleGrab();
+      if (e.code === 'KeyR' && !this.focus) this.interact.uprightNearest();
       if (e.code === 'Space') e.preventDefault();
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => this.keys.clear());
     c.addEventListener('contextmenu', (e) => e.preventDefault());
     c.addEventListener('pointerdown', (e) => {
-      this.drag = { x: e.clientX, y: e.clientY, moved: false, button: e.button };
+      // Grabbing a prop: mouse movement keeps aiming the camera, release throws/drops.
+      const grabbed = !this.focus && this.interact.pointerDown(e);
+      this.drag = { x: e.clientX, y: e.clientY, moved: grabbed, button: e.button };
       c.setPointerCapture(e.pointerId);
     });
     c.addEventListener('pointermove', (e) => {
@@ -308,6 +337,7 @@ export class World {
     c.addEventListener('pointerup', (e) => {
       const d = this.drag;
       this.drag = null;
+      if (this.interact.pointerUp(e)) return;
       if (!d || d.moved) return;
       if (this.focus) {
         const uv = this.screenUv(e, this.focus);
@@ -326,6 +356,7 @@ export class World {
       (e) => {
         e.preventDefault();
         if (this.focus) this.focus.os.wheel(e.deltaY);
+        else if (this.interact.wheel(e.deltaY)) return;
         else this.cam.dist = Math.max(1.1, Math.min(4.5, this.cam.dist * (1 + Math.sign(e.deltaY) * 0.1)));
       },
       { passive: false },
@@ -414,6 +445,7 @@ export class World {
     const move = fwd.multiplyScalar(f).add(right.multiplyScalar(r));
     if (move.lengthSq() > 1) move.normalize();
     this.avatar.update(dt, move, k.has('ShiftLeft') || k.has('ShiftRight'), k.has('Space'), !this.focus);
+    this.interact.update(dt);
 
     this.phys.update(dt);
     this.avatar.postSync();
@@ -422,7 +454,7 @@ export class World {
     const fast = this.cash.update(dt, this.avatar.position, this.game.stat('magnet.radius'), this.game.flag('coins.seekPlayer'), (v, coins) =>
       this.game.collect(v, coins),
     );
-    this.detectChaos(dt, fast);
+    this.chaos.update(dt, this.phys.objs, fast);
     this.jelly(dt, comfort);
     for (const s of this.spinners) s.rotation.y += dt * 25;
 
@@ -443,48 +475,19 @@ export class World {
 
     // Hint text
     const near = this.nearestScreen();
+    const extra = this.focus ? '' : this.interact.hint() || this.chaos.hint();
     this.hint = this.focus
       ? 'Click the screen to play · Esc / E to step back'
-      : near
+      : extra
+        ? extra
+        : near
         ? near.os.screen === 'off'
           ? 'E — power on the crusty PC'
           : 'E — use this screen'
-        : 'WASD move · Shift sprint · Space jump · F flop · drag to look · T skill tree';
+        : 'WASD move · Shift sprint · Space jump · F flop · G grab · R stand up · T skills';
 
     this.updateCamera(dt);
     this.renderer.render(this.scene, this.camera);
-  }
-
-  private detectChaos(dt: number, fastCoins: number): void {
-    const g = this.game;
-    const tracked = [this.room.desk, this.room.pc, this.room.chair, ...this.screens.map((s) => s.obj), ...this.props];
-    const up = new THREE.Vector3();
-    for (const o of tracked) {
-      if (o.kind === 'avatar') continue;
-      up.set(0, 1, 0).applyQuaternion(o.mesh.quaternion);
-      if (o.wasUpright && up.y < 0.45) {
-        o.wasUpright = false;
-        if (o.kind !== 'duck' && o.kind !== 'sock' && o.kind !== 'remote') {
-          this.sfx.thud();
-          g.reportChaos('topple');
-        }
-      } else if (up.y > 0.9) o.wasUpright = true;
-    }
-    this.avalancheT -= dt;
-    if (fastCoins >= 15 && this.avalancheT <= 0) {
-      this.avalancheT = 2;
-      g.reportChaos('avalanche');
-    }
-    this.towerT -= dt;
-    if (this.towerT <= 0) {
-      this.towerT = 1;
-      const high = this.props.filter((p) => p.kind === 'box' && p.body.isSleeping() && p.body.translation().y > 1.15);
-      if (high.length > 0) g.reportChaos('tower');
-    }
-    if (this.avatar.airTime > 1.2) {
-      this.avatar.airTime = 0;
-      g.reportChaos('ragdoll');
-    }
   }
 
   private jelly(dt: number, comfort: number): void {

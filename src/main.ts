@@ -81,6 +81,7 @@ async function boot(): Promise<void> {
   world.onFocusChange = (f) => (ui.focused = f);
   ui.focusMain = () => world.focusMain();
   ui.unfocus = () => world.setFocus(null);
+  ui.tidy = () => world.tidyAll();
   ui.loading = '';
 
   const loop = new FixedLoop(
