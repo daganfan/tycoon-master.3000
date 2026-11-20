@@ -1,6 +1,6 @@
 # Implementation Plan: MVP
 
-> **Status:** Proposal v0.1. Covers the MVP from [GDD §10](./GAME_DESIGN.md#10-scope-and-platform) and Roadmap Milestones 0–2 (plus the MVP slice of Milestone 3).
+> **Status:** Approved v0.2 (owner answers applied). Covers the MVP from [GDD §10](./GAME_DESIGN.md#10-scope-and-platform) and Roadmap Milestones 0–2 (plus the MVP slice of Milestone 3).
 > No game code exists yet. Coding starts only after the owner approves this plan.
 
 ---
@@ -122,7 +122,7 @@ interface MiniTycoon {
 - Each game draws to an offscreen 2D canvas. That canvas becomes a `CanvasTexture` on its in-world monitor. Redraws are throttled when the game isn't in focus.
 - **Focus mode:** the camera eases onto the screen, and pointer input is raycast to UV coordinates and passed to the game.
 - **Machines are slots:** hardware has `speed` and `quality` stats that multiply tick rate and payout.
-- **MVP games:** Lemon Mogul (tutorial), Rubber Duck Works (ducks become physical objects when they jam), Sock Syndicate.
+- **MVP games:** Lemon Mogul (tutorial), Rubber Duck Works, Sock Syndicate, Couch Coin Mining. The other 26 follow per phase (GDD §4). The framework must make a new game a single folder with a data file and a draw function.
 
 ### 4.5 Physics and Chaos
 - Rapier world with sleeping enabled, CCD only on fast objects, and collision groups (player, props, coins, static).
@@ -142,6 +142,12 @@ interface MiniTycoon {
 - **Stacking:** physics patches are applied in rarity order (multiplicative). Visual patches compose through a small material-layer system. Jelly is a vertex-shader wobble driven by contact impulses.
 - **MVP:** 5 skins; Jelly, Bouncy and Gold-Plated modifiers; 1 slot per object (more slots come from the Style branch).
 - Gameplay effects stay small and go through the stats pipeline, e.g. Gold-Plated gives +1% Cash.
+
+### 4.8 TycoonOS (screen interfaces)
+- A small retained-mode UI toolkit drawn on canvas (`src/os/`): windows, buttons, lists, sliders, icons, a taskbar and notifications. It is input-routed through the same focus-mode raycast.
+- **Screens:** boot → lock → desktop. Built-in apps: Settings, eBuy, Wallet, App Store, Mail, Task Manager. Mini-tycoons are apps that implement `MiniTycoon`.
+- **OS version** comes from the machine's hardware tier. It changes the theme, allowed window count and animation quality.
+- The same toolkit renders on in-world monitors and can be shown full-screen in focus mode.
 
 ### 4.7 Save and Load
 - The state is plain JSON: wallet, owned items/nodes, tycoon states, cosmetics, settings, RNG seed and a `version` field.
@@ -221,10 +227,10 @@ After the MVP, Milestones 3–6 follow `ROADMAP.md` unchanged.
 
 ---
 
-## 9. Decisions Needed From the Owner
+## 9. Owner Decisions (resolved)
 
-1. Approve the stack: **TS + Three.js + Rapier + Vite + Svelte**.
-2. Approve the camera: **third-person orbit + focus mode**.
-3. Approve the art approach: **CC0 asset packs + procedural**, with no custom modelling for the MVP.
-4. MVP mini-tycoons: **Lemon Mogul, Rubber Duck Works, Sock Syndicate**. Do you want a different third game?
-5. Title, monetization, license: keep the defaults for now?
+1. Stack approved, plus **TycoonOS**: dynamic screen interfaces (boot, home screen, settings, apps). See GDD §4.1 and §4.8 below.
+2. Camera approved: third-person orbit + focus mode.
+3. Art approved: CC0 asset packs + procedural.
+4. **More content:** 30 mini-tycoons for a ~20 hour playthrough (GDD §4). The MVP ships the 4 Bedroom games.
+5. Title is *Tycoon Master 3000*. No monetization. No license.

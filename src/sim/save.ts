@@ -1,0 +1,103 @@
+import { num } from '@/core/num';
+import type { GameState } from './types';
+import { SAVE_VERSION, createInitialState } from './state';
+
+type RawSave = Record<string, unknown> & { version: number };
+
+/** Ordered migrations: index i upgrades version i+1 → i+2. */
+const MIGRATIONS: ((s: RawSave) => RawSave)[] = [];
+
+export function serialize(state: GameState, now = Date.now()): string {
+  return JSON.stringify({
+    ...state,
+    lastSaved: now,
+    cash: state.cash.toString(),
+    lifetimeCash: state.lifetimeCash.toString(),
+    floorCash: state.floorCash.toString(),
+  });
+}
+
+export function deserialize(text: string): GameState {
+  let raw = JSON.parse(text) as RawSave;
+  if (typeof raw.version !== 'number') throw new Error('Save has no version');
+  if (raw.version > SAVE_VERSION) throw new Error(`Save is from a newer version (${raw.version})`);
+  while (raw.version < SAVE_VERSION) {
+    const m = MIGRATIONS[raw.version - 1];
+    if (!m) throw new Error(`No migration from v${raw.version}`);
+    raw = m(raw);
+  }
+  const base = createInitialState();
+  const s = { ...base, ...raw } as unknown as GameState & { cash: unknown; lifetimeCash: unknown; floorCash: unknown };
+  s.cash = num(String(s.cash ?? 0));
+  s.lifetimeCash = num(String(s.lifetimeCash ?? 0));
+  s.floorCash = num(String(s.floorCash ?? 0));
+  s.tokens = { ...base.tokens, ...s.tokens };
+  s.settings = { ...base.settings, ...s.settings };
+  s.cosmetics = { owned: s.cosmetics?.owned ?? [], equipped: s.cosmetics?.equipped ?? {} };
+  return s;
+}
+
+export const exportSave = (state: GameState): string => btoa(unescape(encodeURIComponent(serialize(state))));
+export const importSave = (code: string): GameState => deserialize(decodeURIComponent(escape(atob(code.trim()))));
+
+/** Storage backend: IndexedDB in the browser, an in-memory map in tests. */
+export interface SaveStore {
+  get(slot: string): Promise<string | undefined>;
+  set(slot: string, text: string): Promise<void>;
+}
+
+export class MemoryStore implements SaveStore {
+  data = new Map<string, string>();
+  async get(slot: string) {
+    return this.data.get(slot);
+  }
+  async set(slot: string, text: string) {
+    this.data.set(slot, text);
+  }
+}
+
+export class IdbStore implements SaveStore {
+  private db: Promise<IDBDatabase>;
+  constructor(name = 'tycoon-master-3000') {
+    this.db = new Promise((resolve, reject) => {
+      const req = indexedDB.open(name, 1);
+      req.onupgradeneeded = () => req.result.createObjectStore('saves');
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  private async tx<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+    const db = await this.db;
+    return new Promise((resolve, reject) => {
+      const req = fn(db.transaction('saves', mode).objectStore('saves'));
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async get(slot: string) {
+    return (await this.tx('readonly', (s) => s.get(slot))) as string | undefined;
+  }
+  async set(slot: string, text: string) {
+    await this.tx('readwrite', (s) => s.put(text, slot));
+  }
+}
+
+/** Writes the main slot and rotates the previous save into a backup. */
+export async function writeSave(store: SaveStore, state: GameState): Promise<void> {
+  const prev = await store.get('main');
+  if (prev) await store.set('backup', prev);
+  await store.set('main', serialize(state));
+}
+
+export async function readSave(store: SaveStore): Promise<GameState | undefined> {
+  for (const slot of ['main', 'backup']) {
+    const text = await store.get(slot);
+    if (!text) continue;
+    try {
+      return deserialize(text);
+    } catch (e) {
+      console.warn(`Save slot ${slot} unreadable`, e);
+    }
+  }
+  return undefined;
+}
