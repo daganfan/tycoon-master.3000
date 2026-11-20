@@ -38,7 +38,7 @@ describe('content validation', () => {
     for (const i of ITEMS) expect(i.baseCost).toBeGreaterThan(0);
     for (const a of SKILL_NODES)
       for (const b of SKILL_NODES)
-        if (a !== b) expect(Math.hypot(a.pos.x - b.pos.x, a.pos.y - b.pos.y), `${a.id}/${b.id}`).toBeGreaterThan(40);
+        if (a !== b) expect(Math.hypot(a.pos.x - b.pos.x, a.pos.y - b.pos.y), `${a.id}/${b.id}`).toBeGreaterThan(55);
   });
 
   it('every tycoon has a primary action', () => {

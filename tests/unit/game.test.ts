@@ -4,7 +4,11 @@ import { createInitialState } from '@/sim/state';
 import { num } from '@/core/num';
 import { MemoryStore, deserialize, exportSave, importSave, readSave, serialize, writeSave } from '@/sim/save';
 
-const fresh = () => new Game(createInitialState(1, 0));
+const fresh = () => {
+  const g = new Game(createInitialState(1, 0));
+  g.setFlag('booted');
+  return g;
+};
 
 describe('Game basics', () => {
   it('starts with Lemon Mogul installed and one slot', () => {

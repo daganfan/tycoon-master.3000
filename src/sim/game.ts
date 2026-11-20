@@ -104,7 +104,9 @@ export class Game {
   tick(dt: number): void {
     const s = this.state;
     s.time += dt;
-    for (const rt of this.running()) {
+    // Nothing runs until the crusty PC has been switched on.
+    const booted = s.flags.includes('booted');
+    for (const rt of booted ? this.running() : []) {
       const def = tycoonById(rt.id);
       def.tick(rt.state, rt, dt, this.ctx(rt));
     }
@@ -176,8 +178,10 @@ export class Game {
   }
 
   private checkQuests(): void {
+    // Quests complete in order: only the current one is checked.
     for (const q of QUESTS) {
-      if (this.state.quests.includes(q.id) || !q.done(this.state)) continue;
+      if (this.state.quests.includes(q.id)) continue;
+      if (!q.done(this.state)) break;
       this.state.quests.push(q.id);
       if (q.reward > 0) this.addCash(num(q.reward));
       this.bus.emit('questDone', { id: q.id });

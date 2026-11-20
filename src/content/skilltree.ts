@@ -4,7 +4,7 @@ import type { SkillNodeDef } from '@/sim/types';
 function at(angle: number, ring: number, side = 0): { x: number; y: number } {
   const a = (angle * Math.PI) / 180;
   const r = ring * 110;
-  return { x: Math.round(Math.cos(a) * r - Math.sin(a) * side * 70), y: Math.round(Math.sin(a) * r + Math.cos(a) * side * 70) };
+  return { x: Math.round(Math.cos(a) * r - Math.sin(a) * side * 95), y: Math.round(Math.sin(a) * r + Math.cos(a) * side * 95) };
 }
 
 const H = -90; // hustle up

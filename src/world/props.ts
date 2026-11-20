@@ -1,0 +1,236 @@
+import * as THREE from 'three';
+import type { Physics, PhysObj } from './physics';
+import { buildMonitor, mat, rbox, shadowed, ROOM } from './room';
+import { fabric, posterTex } from './textures';
+
+export interface PropResult {
+  obj?: PhysObj;
+  /** Present when the prop has a screen that should run its own TycoonOS. */
+  screen?: { mesh: THREE.Mesh; obj: PhysObj; w: number; h: number };
+  light?: THREE.PointLight;
+}
+
+const { hx, hz } = ROOM;
+
+/** Where each unit of an item appears. Index = how many were owned before. */
+const SLOTS: Record<string, THREE.Vector3[]> = {
+  monitor: [new THREE.Vector3(0.45, 0, -hz + 0.45), new THREE.Vector3(-0.6, 0, -hz + 0.45), new THREE.Vector3(0.62, 0.0, -hz + 0.62)],
+  keyboard: [new THREE.Vector3(-0.1, 0, -hz + 0.65), new THREE.Vector3(0.4, 0, -hz + 0.7), new THREE.Vector3(-0.55, 0, -hz + 0.7)],
+  pc: [new THREE.Vector3(hx - 0.45, 0, -1.2), new THREE.Vector3(hx - 0.45, 0, -0.3), new THREE.Vector3(hx - 0.45, 0, 1.7)],
+  fan: [new THREE.Vector3(-0.68, 0, -hz + 0.62), new THREE.Vector3(-2.3, 0, -hz + 0.5), new THREE.Vector3(2.2, 0, 1.9)],
+  lamp: [new THREE.Vector3(0.7, 0, -hz + 0.35), new THREE.Vector3(-2.6, 0, -0.5), new THREE.Vector3(1.4, 1.52, -hz + 0.12), new THREE.Vector3(2.6, 0, 2.2)],
+  poster: [new THREE.Vector3(0.0, 1.75, -hz + 0.005), new THREE.Vector3(-hx + 0.005, 1.7, -1.4), new THREE.Vector3(hx - 0.005, 1.7, 2.0), new THREE.Vector3(-0.4, 1.75, hz - 0.005)],
+  plant: [new THREE.Vector3(-2.6, 0, -2.1), new THREE.Vector3(2.6, 0, -2.1), new THREE.Vector3(0.6, 0, 2.2)],
+  beanbag: [new THREE.Vector3(-1.4, 0, 1.8), new THREE.Vector3(0.0, 0, 1.9)],
+  box: [0, 1, 2, 3, 4, 5].map((i) => new THREE.Vector3(-1.9 + (i % 2) * 0.05, 0.25 + i * 0.42, -1.7 + (i % 3) * 0.03)),
+  piggy: [new THREE.Vector3(1.25, 1.53, -hz + 0.12)],
+};
+
+export function propSlot(prop: string, index: number): THREE.Vector3 {
+  const arr = SLOTS[prop];
+  const base = arr?.[Math.min(index, (arr?.length ?? 1) - 1)] ?? new THREE.Vector3(0, 0.5, 0);
+  return base.clone().add(new THREE.Vector3(0, 0, 0.001 * index));
+}
+
+const POSTERS: [string, string, string][] = [['HUSTLE', '#e63946', '#f1faee'], ['STONKS', '#2a9d8f', '#ffffff'], ['NO\nSLEEP', '#111', '#ffcc00'], ['VIBES', '#7b2cbf', '#fff']];
+
+export function createProp(prop: string, index: number, scene: THREE.Scene, phys: Physics, deskY: number): PropResult {
+  const R = phys.R;
+  const at = propSlot(prop, index);
+  const body = (pos: THREE.Vector3Like, rotY = 0) => phys.createBody({ pos, rot: new THREE.Euler(0, rotY, 0), angularDamping: 0.6 });
+  switch (prop) {
+    case 'monitor': {
+      const m = buildMonitor(0.42, 0.26, false);
+      scene.add(m.group);
+      const b = body({ x: at.x, y: deskY + 0.03, z: at.z }, index === 1 ? 0.25 : -0.25);
+      phys.addCollider(b, R.ColliderDesc.cuboid(0.12, 0.01, 0.1).setTranslation(0, 0.01, -0.04), { density: 2500 });
+      phys.addCollider(b, R.ColliderDesc.cuboid(m.half.x, 0.15, 0.03).setTranslation(0, 0.16 + 0.13, 0), { density: 300 });
+      const obj = phys.track(m.group, b, 'monitor', 'pc', { restitution: 0.1, friction: 0.8, density: 300 });
+      return { obj, screen: { mesh: m.screen, obj, w: 0.42, h: 0.26 } };
+    }
+    case 'keyboard': {
+      const g = new THREE.Group();
+      const k = rbox(0.44, 0.03, 0.14, 0.008, mat('#202226', 0.5));
+      g.add(k);
+      for (let r = 0; r < 4; r++)
+        for (let c = 0; c < 14; c++) {
+          const key = rbox(0.024, 0.012, 0.024, 0.004, mat(r === 3 && c > 3 && c < 10 ? '#3a3d44' : '#2e3138', 0.6));
+          key.position.set(-0.19 + c * 0.029, 0.02, -0.045 + r * 0.03);
+          g.add(key);
+        }
+      scene.add(shadowed(g));
+      const b = body({ x: at.x, y: deskY + 0.05, z: at.z });
+      phys.addCollider(b, R.ColliderDesc.cuboid(0.22, 0.015, 0.07), { density: 900 });
+      return { obj: phys.track(g, b, 'keyboard', 'props', { restitution: 0.2, friction: 0.7, density: 900 }) };
+    }
+    case 'pc': {
+      // Side table + flat monitor + tower, running its own OS.
+      const table = new THREE.Group();
+      const top = rbox(0.6, 0.04, 0.9, 0.01, mat('#ece6d8', 0.45));
+      top.position.y = 0.72;
+      table.add(top);
+      for (const [x, z] of [[-0.27, -0.42], [0.27, -0.42], [-0.27, 0.42], [0.27, 0.42]] as const) {
+        const leg = rbox(0.04, 0.72, 0.04, 0.01, mat('#ece6d8', 0.45));
+        leg.position.set(x, 0.36, z);
+        table.add(leg);
+      }
+      scene.add(shadowed(table));
+      const tb = body({ x: at.x, y: 0, z: at.z });
+      phys.addCollider(tb, R.ColliderDesc.cuboid(0.3, 0.02, 0.45).setTranslation(0, 0.72, 0), { density: 250 });
+      for (const [x, z] of [[-0.27, -0.42], [0.27, -0.42], [-0.27, 0.42], [0.27, 0.42]] as const)
+        phys.addCollider(tb, R.ColliderDesc.cuboid(0.02, 0.36, 0.02).setTranslation(x, 0.36, z), { density: 600 });
+      phys.track(table, tb, 'table', 'desk', { restitution: 0.05, friction: 0.9, density: 250 });
+      const m = buildMonitor(0.46, 0.29, false);
+      scene.add(m.group);
+      const mb = body({ x: at.x, y: 0.75, z: at.z }, -Math.PI / 2);
+      phys.addCollider(mb, R.ColliderDesc.cuboid(0.12, 0.01, 0.1).setTranslation(0, 0.01, -0.04), { density: 2500 });
+      phys.addCollider(mb, R.ColliderDesc.cuboid(m.half.x, 0.16, 0.03).setTranslation(0, 0.16 + 0.145, 0), { density: 300 });
+      const obj = phys.track(m.group, mb, 'monitor', 'pc', { restitution: 0.1, friction: 0.8, density: 300 });
+      return { obj, screen: { mesh: m.screen, obj, w: 0.46, h: 0.29 } };
+    }
+    case 'fan': {
+      const g = new THREE.Group();
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.1, 0.03, 24), mat('#e8e8e8', 0.4));
+      g.add(base);
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.22), mat('#cfcfcf', 0.3, 0.6));
+      pole.position.y = 0.12;
+      g.add(pole);
+      const cage = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.006, 8, 32), mat('#cfcfcf', 0.3, 0.8));
+      cage.position.set(0, 0.28, 0.02);
+      g.add(cage);
+      const blades = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.005, 3), mat('#5fb3d8', 0.4));
+      blades.rotation.x = Math.PI / 2;
+      blades.position.set(0, 0.28, 0.02);
+      blades.name = 'spin';
+      g.add(blades);
+      scene.add(shadowed(g));
+      const y = at.y > 0 ? at.y : at.x > -1 && at.x < 1 ? deskY + 0.05 : 0.02;
+      const b = body({ x: at.x, y, z: at.z });
+      phys.addCollider(b, R.ColliderDesc.cylinder(0.015, 0.1), { density: 900 });
+      phys.addCollider(b, R.ColliderDesc.ball(0.11).setTranslation(0, 0.28, 0.02), { density: 60 });
+      return { obj: phys.track(g, b, 'fan', 'props', { restitution: 0.2, friction: 0.6, density: 60 }) };
+    }
+    case 'lamp': {
+      const g = new THREE.Group();
+      const colors = ['#ff3d7f', '#3dd5ff', '#9dff3d', '#ffb13d'];
+      const c = colors[index % colors.length]!;
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 0.08, 20), mat('#c0c0c8', 0.25, 1));
+      base.position.y = 0.04;
+      g.add(base);
+      const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.05, 0.22, 20), new THREE.MeshPhysicalMaterial({ color: c, transmission: 0.6, roughness: 0.1, emissive: c, emissiveIntensity: 0.9, thickness: 0.05 }));
+      glass.position.y = 0.19;
+      g.add(glass);
+      const cap = new THREE.Mesh(new THREE.ConeGeometry(0.036, 0.06, 20), mat('#c0c0c8', 0.25, 1));
+      cap.position.y = 0.33;
+      g.add(cap);
+      const light = new THREE.PointLight(c, 0.6, 2.2, 2);
+      light.position.y = 0.22;
+      g.add(light);
+      scene.add(shadowed(g));
+      const y = at.y > 0 ? at.y + 0.02 : at.x > -1 && at.x < 1 && at.z < -1.5 ? deskY + 0.03 : 0.01;
+      const b = body({ x: at.x, y, z: at.z });
+      phys.addCollider(b, R.ColliderDesc.cylinder(0.04, 0.06).setTranslation(0, 0.04, 0), { density: 2500 });
+      phys.addCollider(b, R.ColliderDesc.cylinder(0.14, 0.04).setTranslation(0, 0.22, 0), { density: 400 });
+      return { obj: phys.track(g, b, 'lamp', 'props', { restitution: 0.15, friction: 0.6, density: 400 }), light };
+    }
+    case 'poster': {
+      const [t, bg, fg] = POSTERS[index % POSTERS.length]!;
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(0.45, 0.63), mat('#fff', 0.75, 0, { map: posterTex(t, bg, fg) }));
+      m.position.copy(at);
+      if (Math.abs(at.x) > hx - 0.1) m.rotation.y = at.x > 0 ? -Math.PI / 2 : Math.PI / 2;
+      if (at.z > hz - 0.1) m.rotation.y = Math.PI;
+      m.rotation.z = (index % 2 ? 1 : -1) * 0.03;
+      scene.add(m);
+      return {};
+    }
+    case 'plant': {
+      const g = new THREE.Group();
+      const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.12, 0.3, 24), mat('#c96b4a', 0.8));
+      pot.position.y = 0.15;
+      g.add(pot);
+      const leafM = mat('#3f8f4a', 0.6, 0, { side: THREE.DoubleSide });
+      for (let i = 0; i < 9; i++) {
+        const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 8).scale(0.35, 1, 0.12), leafM);
+        leaf.position.set(Math.cos(i * 0.7) * 0.07, 0.48 + (i % 3) * 0.08, Math.sin(i * 0.7) * 0.07);
+        leaf.rotation.set(Math.sin(i) * 0.6, i * 0.7, Math.cos(i) * 0.6);
+        g.add(leaf);
+      }
+      scene.add(shadowed(g));
+      const b = body({ x: at.x, y: 0, z: at.z });
+      phys.addCollider(b, R.ColliderDesc.cylinder(0.15, 0.15).setTranslation(0, 0.15, 0), { density: 900 });
+      phys.addCollider(b, R.ColliderDesc.ball(0.2).setTranslation(0, 0.55, 0), { density: 30 });
+      return { obj: phys.track(g, b, 'plant', 'props', { restitution: 0.1, friction: 0.8, density: 900 }) };
+    }
+    case 'beanbag': {
+      const colors = ['#e07a5f', '#3d405b'];
+      const m = new THREE.Mesh(new THREE.SphereGeometry(0.42, 28, 20).scale(1, 0.62, 1), mat('#fff', 0.95, 0, { map: fabric(colors[index % 2]!) }));
+      m.position.y = 0;
+      const g = new THREE.Group();
+      g.add(m);
+      scene.add(shadowed(g));
+      const b = body({ x: at.x, y: 0.3, z: at.z });
+      phys.addCollider(b, R.ColliderDesc.ball(0.3), { density: 120, restitution: 0.5, friction: 0.9 });
+      return { obj: phys.track(g, b, 'beanbag', 'props', { restitution: 0.5, friction: 0.9, density: 120 }) };
+    }
+    case 'box': {
+      const m = rbox(0.4, 0.4, 0.4, 0.015, mat('#c49a6c', 0.85));
+      const tape = new THREE.Mesh(new THREE.BoxGeometry(0.41, 0.005, 0.08), mat('#d8c39a', 0.4));
+      tape.position.y = 0.2;
+      m.add(tape);
+      scene.add(shadowed(m));
+      const b = body({ x: at.x, y: at.y, z: at.z });
+      phys.addCollider(b, R.ColliderDesc.cuboid(0.2, 0.2, 0.2), { density: 60, friction: 0.8 });
+      return { obj: phys.track(m, b, 'box', 'props', { restitution: 0.15, friction: 0.8, density: 60 }) };
+    }
+    case 'piggy': {
+      const g = new THREE.Group();
+      const pink = mat('#f7a1c4', 0.35);
+      const bodyM = new THREE.Mesh(new THREE.SphereGeometry(0.09, 20, 16).scale(1.3, 1, 1), pink);
+      bodyM.position.y = 0.09;
+      g.add(bodyM);
+      const snout = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.03, 16), pink);
+      snout.rotation.z = Math.PI / 2;
+      snout.position.set(0.12, 0.09, 0);
+      g.add(snout);
+      scene.add(shadowed(g));
+      const b = body({ x: at.x, y: at.y + 0.02, z: at.z });
+      phys.addCollider(b, R.ColliderDesc.ball(0.09).setTranslation(0, 0.09, 0), { density: 700 });
+      return { obj: phys.track(g, b, 'piggy', 'props', { restitution: 0.3, friction: 0.6, density: 700 }) };
+    }
+  }
+  return {};
+}
+
+/** Physical objects that escape from mini-tycoons (ducks from a jam, etc.). */
+export function spawnToy(kind: string, from: THREE.Vector3, dir: THREE.Vector3, scene: THREE.Scene, phys: Physics): PhysObj {
+  const R = phys.R;
+  const g = new THREE.Group();
+  let collider;
+  if (kind === 'duck') {
+    const yellow = mat('#ffd21f', 0.35);
+    const b = new THREE.Mesh(new THREE.SphereGeometry(0.06, 18, 14).scale(1.25, 0.9, 1), yellow);
+    g.add(b);
+    const h = new THREE.Mesh(new THREE.SphereGeometry(0.04, 16, 12), yellow);
+    h.position.set(0.05, 0.06, 0);
+    g.add(h);
+    const beak = new THREE.Mesh(new THREE.ConeGeometry(0.015, 0.035, 12), mat('#ff7a1a', 0.5));
+    beak.rotation.z = -Math.PI / 2;
+    beak.position.set(0.095, 0.055, 0);
+    g.add(beak);
+    collider = R.ColliderDesc.ball(0.07);
+  } else if (kind === 'sock') {
+    const s = new THREE.Mesh(new THREE.CapsuleGeometry(0.035, 0.16, 6, 12), mat('#fff', 0.95, 0, { map: fabric(['#e94b4b', '#4b8be9', '#3fc46a'][Math.floor(Math.random() * 3)]!) }));
+    s.rotation.z = Math.PI / 2;
+    g.add(s);
+    collider = R.ColliderDesc.capsule(0.08, 0.035).setRotation({ x: 0, y: 0, z: Math.SQRT1_2, w: Math.SQRT1_2 });
+  } else {
+    const r = rbox(0.06, 0.03, 0.2, 0.01, mat('#1d1d1f', 0.5));
+    g.add(r);
+    collider = R.ColliderDesc.cuboid(0.03, 0.015, 0.1);
+  }
+  scene.add(shadowed(g));
+  const body = phys.createBody({ pos: from, ccd: true, angularDamping: 0.3 });
+  phys.addCollider(body, collider, { density: 200, restitution: kind === 'duck' ? 0.7 : 0.2 });
+  body.setLinvel({ x: dir.x * 3 + (Math.random() - 0.5), y: 2 + Math.random(), z: dir.z * 3 + (Math.random() - 0.5) }, true);
+  return phys.track(g, body, kind, 'props', { restitution: kind === 'duck' ? 0.7 : 0.2, friction: 0.6, density: 200 });
+}
