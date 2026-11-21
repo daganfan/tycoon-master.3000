@@ -10,6 +10,7 @@ import type { OsApp } from '../os';
 import { splitH, splitV, type Rect, type Ui } from '../ui';
 import { VIEWS } from './views';
 import { junkMart } from './junkmart';
+import { netplay } from './netplay'; // multiplayer (src/net)
 
 const scrolls = new Map<string, number>();
 
@@ -339,4 +340,4 @@ const settings: OsApp = {
   },
 };
 
-export const builtinApps: OsApp[] = [ebuy, junkMart, appStore, skills, wardrobe, wallet, mail, taskmgr, settings];
+export const builtinApps: OsApp[] = [ebuy, junkMart, appStore, skills, wardrobe, wallet, mail, taskmgr, settings, netplay];

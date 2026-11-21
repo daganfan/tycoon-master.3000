@@ -12,6 +12,7 @@ You start out broke, with nothing but a crusty old PC. You play tycoon games to 
 - **Install it as an app:** use the **Install** icon in the address bar (Chrome/Edge), **Add to Home Screen** (iPhone/iPad/Android) or **File → Add to Dock** (Safari on Mac).
 - **Desktop downloads:** Windows installer/portable `.exe`, Mac `.dmg` and Linux AppImage are built by the **Desktop builds** workflow in the Actions tab.
 - **Share elsewhere:** `npm run package:web` makes a zip ready for itch.io or Netlify.
+- **Play with friends:** click **👥 Multiplayer → Host a room** and send the link. Friends just open it; no accounts, no server. See **[docs/MULTIPLAYER.md](docs/MULTIPLAYER.md)**.
 
 👉 Step-by-step guide (no coding needed): **[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)**
 
@@ -32,6 +33,7 @@ You start out broke, with nothing but a crusty old PC. You play tycoon games to 
 | [Implementation Plan](docs/IMPLEMENTATION_PLAN.md) | MVP architecture, systems, milestones, tests, risks |
 | [Roadmap](docs/ROADMAP.md) | Milestones from prototype to release |
 | [Sharing & Installing](docs/DISTRIBUTION.md) | Web link, installable app, desktop downloads, itch.io |
+| [Multiplayer](docs/MULTIPLAYER.md) | Inviting friends into your room, how it works, limits, privacy |
 | [Contributing](CONTRIBUTING.md) | Branching, commits and conventions |
 | [Changelog](CHANGELOG.md) | Notable changes |
 
@@ -68,6 +70,8 @@ Add `?fresh` to the URL to start a new game without touching your save.
 | Esc | Step back from a screen |
 | T | Skill tree |
 | F | Flop over (mayhem!) |
+| Enter | Chat (multiplayer) |
+| 1 / 2 / 3 | Wave / dance / flop emote (multiplayer) |
 
 ## Tech Stack
 
@@ -84,6 +88,7 @@ See the [Implementation Plan](docs/IMPLEMENTATION_PLAN.md) for the architecture.
 │   ├── content/     Data: items, skill nodes, cosmetics, quests
 │   ├── os/          TycoonOS: canvas UI toolkit, desktop, apps, game views
 │   ├── world/       Three.js + Rapier: room, props, cash, avatar, camera
+│   ├── net/         Multiplayer: P2P transport, protocol, replication, sessions
 │   └── ui/          Svelte HUD and skill tree overlay
 ├── tests/           unit/, sim/ (balance), e2e/ (Playwright)
 ├── scripts/         Dev scripts (balance report)

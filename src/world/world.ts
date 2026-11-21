@@ -15,6 +15,7 @@ import { Sfx } from './audio';
 import { Interact } from './interact';
 import { ChaosDetector } from './chaos';
 import { CosmeticFx } from './cosmeticFx';
+import type { NetHooks } from './remote';
 
 interface ScreenEntry {
   os: TycoonOS;
@@ -43,6 +44,8 @@ export class World {
   lighting: Lighting | null = null;
   focus: ScreenEntry | null = null;
   onFocusChange: (focused: boolean) => void = () => {};
+  /** Multiplayer session hooks (src/net); null when playing alone. */
+  netHooks: NetHooks | null = null;
   private focusBlend = 0;
   private cam = { yaw: 0, pitch: 0.32, dist: 2.4 };
   private keys = new Set<string>();
@@ -298,7 +301,7 @@ export class World {
     c.addEventListener('pointermove', (e) => {
       if (this.focus) {
         const uv = this.screenUv(e, this.focus);
-        if (uv) this.focus.os.pointerMove(uv.x, uv.y);
+        if (uv && !this.netScreen('move', uv)) this.focus.os.pointerMove(uv.x, uv.y);
         c.style.cursor = this.focus.os.ui.hovering ? 'pointer' : 'default';
       }
       if (!this.drag) return;
@@ -320,7 +323,7 @@ export class World {
       if (this.focus) {
         const uv = this.screenUv(e, this.focus);
         if (uv) {
-          this.focus.os.click(uv.x, uv.y);
+          if (!this.netScreen('click', uv)) this.focus.os.click(uv.x, uv.y);
           this.sfx.click();
         } else if (d.button === 0) this.setFocus(null);
         return;
@@ -333,12 +336,19 @@ export class World {
       'wheel',
       (e) => {
         e.preventDefault();
-        if (this.focus) this.focus.os.wheel(e.deltaY);
+        if (this.focus) {
+          if (!this.netScreen('wheel', { x: 0, y: e.deltaY })) this.focus.os.wheel(e.deltaY);
+        }
         else if (this.interact.wheel(e.deltaY)) return;
         else this.cam.dist = Math.max(1.1, Math.min(4.5, this.cam.dist * (1 + Math.sign(e.deltaY) * 0.1)));
       },
       { passive: false },
     );
+  }
+
+  /** Multiplayer: let the net session take screen input (visitors forward it to the host). */
+  private netScreen(kind: 'move' | 'click' | 'wheel', p: { x: number; y: number }): boolean {
+    return !!this.focus && !!this.netHooks?.screenInput(this.screens.indexOf(this.focus), kind, p.x, p.y);
   }
 
   private ndc(e: PointerEvent | MouseEvent): THREE.Vector2 {
@@ -425,6 +435,7 @@ export class World {
     this.avatar.update(dt, move, k.has('ShiftLeft') || k.has('ShiftRight'), k.has('Space'), !this.focus);
     this.interact.update(dt);
 
+    this.netHooks?.prePhysics(dt);
     this.phys.update(dt);
     this.avatar.postSync();
 
@@ -432,6 +443,7 @@ export class World {
     const fast = this.cash.update(dt, this.avatar.position, this.game.stat('magnet.radius'), this.game.flag('coins.seekPlayer'), (v, coins) =>
       this.game.collect(v, coins),
     );
+    this.netHooks?.postPhysics(dt);
     this.chaos.update(dt, this.phys.objs, fast);
     this.jelly(dt, comfort);
     this.fx?.update(dt, this.time);
