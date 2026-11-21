@@ -71,24 +71,64 @@ Each phase is a new physical location with more space, more slots for machines, 
 
 Each mini-tycoon is a short, original, self-contained management game with its **own twist mechanic**. Players unlock them over time, run several in parallel, and eventually automate them.
 
-Starter list (all original concepts, working names):
+**Target: 30 mini-tycoons** spread across the phases, so a full playthrough lasts **~20 hours**. All are original concepts (working names). Each one takes roughly 20–60 minutes to master, and later ones are unlocked by earlier milestones.
 
-| Mini-Tycoon | Twist |
-|---|---|
-| **Lemon Mogul** | Tutorial game. Pricing vs. weather. |
-| **Rubber Duck Works** | Assembly line; ducks are physics objects that jam the belts. |
-| **Hot Dog Highway** | Placing carts on a traffic map. |
-| **Sock Syndicate** | Matching pairs; unmatched socks are a "loss" resource. |
-| **Cloud Farm** | Harvest weather; sell rain to other games (cross-game economy). |
-| **Haunted Hotel Inc.** | Guests are scared on purpose; fear = revenue, too much fear = lawsuits. |
-| **Robo Car Wash** | Queue/throughput puzzle; robots occasionally rebel. |
-| **Meme Stock Exchange** | Volatile market; buy hype, sell before it crashes. |
-| **Space Pizza Express** | Delivery routing across planets with travel time. |
-| **Tycoon Tycoon** | Late game: a mini-tycoon about running a tycoon studio (recursion foreshadowing). |
+| # | Mini-Tycoon | Phase | Twist |
+|---|---|---|---|
+| 1 | **Lemon Mogul** | Bedroom | Tutorial. Pricing vs. weather. |
+| 2 | **Rubber Duck Works** | Bedroom | Assembly line; ducks are physics objects that jam the belts. |
+| 3 | **Sock Syndicate** | Bedroom | Matching pairs; unmatched socks are a "loss" resource. |
+| 4 | **Couch Coin Mining** | Bedroom | Dig through couch cushions; deeper layers hold rarer finds. |
+| 5 | **Hot Dog Highway** | Garage | Placing carts on a traffic map. |
+| 6 | **Robo Car Wash** | Garage | Queue/throughput puzzle; robots occasionally rebel. |
+| 7 | **Bee & Breakfast** | Garage | Bee hotel; happy bees make honey, angry bees make lawsuits. |
+| 8 | **Garden Gnome Empire** | Garage | Breed gnome variants; rare gnomes sell to collectors. |
+| 9 | **Yard Sale Kingpin** | Garage | Haggling; buy junk low, flip it high. |
+| 10 | **Cloud Farm** | LAN Café | Harvest weather; sell rain to other games (cross-game economy). |
+| 11 | **Haunted Hotel Inc.** | LAN Café | Fear = revenue, too much fear = lawsuits. |
+| 12 | **Pizza Tower Defense** | LAN Café | Defend a pizzeria from hungry crowds by feeding them. |
+| 13 | **Spaghetti Logistics** | LAN Café | Route noodles through a pipe network. |
+| 14 | **Penguin Ice Cream Co.** | LAN Café | Keep the freezer cold; penguins work faster when it's colder. |
+| 15 | **Dino Daycare** | LAN Café | Raise baby dinos; they grow and outgrow their pens. |
+| 16 | **Meme Stock Exchange** | Indie Studio | Volatile market; buy hype, sell before it crashes. |
+| 17 | **Space Pizza Express** | Indie Studio | Delivery routing across planets with travel time. |
+| 18 | **Wizard School Admin** | Indie Studio | Students explode cauldrons; tuition vs. insurance. |
+| 19 | **Moon Real Estate** | Indie Studio | Low-gravity buildings that drift if not anchored. |
+| 20 | **Influencer Farm** | Indie Studio | Grow followers; trends decay over time. |
+| 21 | **Time Travel Tours** | Indie Studio | Tourists change history; paradoxes reset routes. |
+| 22 | **Volcano Spa Resort** | Tycoon Tower | Heat management; eruptions are both a hazard and a tourist draw. |
+| 23 | **Kaiju Insurance** | Tycoon Tower | Sell policies; giant monsters arrive on a schedule you can predict. |
+| 24 | **Submarine Sushi** | Tycoon Tower | Deep-sea fishing depth vs. pressure. |
+| 25 | **Cat Café Galaxy** | Tycoon Tower | Cats choose their own tables; you design for chaos. |
+| 26 | **Robot Uprising HR** | Tycoon Tower | Keep robot workers happy enough not to revolt. |
+| 27 | **Black Hole Recycling** | Tycoon Tower | Feed trash to a black hole; it grows and pulls on everything. |
+| 28 | **Parallel Universe Outlet** | Tycoon Tower | Buy goods from alternate universes; some are cursed. |
+| 29 | **Tycoon Tycoon** | Tycoon Tower | A mini-tycoon about running a tycoon studio (recursion foreshadowing). |
+| 30 | **Tycoon Master 3000** | The Recursion | The game itself, playable on an in-world screen. |
+
+**Pacing target:** Bedroom ~1.5h, Garage ~3h, LAN Café ~4h, Indie Studio ~4.5h, Tycoon Tower ~5h, The Recursion ~2h. Total ~20h for a first full playthrough. Prestige and completionism extend it.
+
+### 4.1 TycoonOS: Dynamic Screen Interfaces
+
+Every in-world screen runs **TycoonOS**, a fake operating system with its own dynamic interface. Mini-tycoons are apps that run inside it.
+
+- **Boot screen** → **lock screen** → **home screen/desktop** with app icons, a taskbar, a clock and notifications ("Payout ready!", "Monitor fell over").
+- **Built-in apps:**
+  - **Settings:** wallpaper, theme, brightness, physics comfort, volume.
+  - **eBuy:** the in-world shop.
+  - **Wallet:** Cash and tokens.
+  - **Skill Tree:** also reachable from the HUD.
+  - **App Store:** unlock and install new mini-tycoons.
+  - **Mail:** story and quest hooks, including Mom's notes.
+  - **Task Manager:** shows which games are running and what they earn.
+- **OS versions scale with hardware:** TycoonOS 95 (chunky gray), then XP-ish (glossy), then Vista Pro (glass), then TycoonOS 3000 (holographic). Better hardware means a nicer and faster UI and more simultaneous app windows.
+- **Windowed multitasking:** higher OS versions run several apps side by side on one screen.
+- **Themes and wallpapers** are cosmetics that tie into the skin system.
+- **Glitches:** overheating or power issues cause screen tearing, blue screens and fake viruses (comedy + light management).
 
 **Shared systems:** each mini-tycoon has its own level, a prestige track and milestones. Milestones award **Tokens** (see §6).
 
-🟡 **Open:** How hands-on are the mini-tycoons: real playable mini-games, or mostly idle with a few clicks? (Proposal: hands-on early, automatable later.)
+**Decided:** hands-on early (1–2 active verbs each), automatable later through bots and skills.
 
 ---
 
@@ -228,12 +268,12 @@ Everything in the outer world is a physics object:
 | Build | **Vite** | Fast dev server and builds |
 | Save | LocalStorage/IndexedDB plus export/import, cloud saves later | Simple to start |
 
-🟡 **Open:** confirm stack. Alternatives: **Godot 4** (desktop-first, built-in physics) or **Unity** (strongest realistic visuals, heavier toolchain).
+**Decided:** this stack, with Svelte for the UI.
 
 ### MVP (first playable)
 
 - Phase 1 (Bedroom) only
-- 2–3 mini-tycoons
+- 4 mini-tycoons (Bedroom set) running inside TycoonOS
 - Cash + 3 token types
 - ~25 skill tree nodes
 - Physical cash with pickup
@@ -248,12 +288,12 @@ See [`ROADMAP.md`](./ROADMAP.md) for milestones.
 
 | # | Question | Notes |
 |---|---|---|
-| 1 | Final tech stack? | See §10 |
-| 2 | Final game title? | Working title: *Tycoon Master 3000* |
+| 1 | Final tech stack? | **Decided:** TS + Three.js + Rapier + Vite + Svelte |
+| 2 | Final game title? | **Decided:** *Tycoon Master 3000* |
 | 3 | Single-player only, or leaderboards/co-op later? | Leaderboards are cheap to add later |
-| 4 | Monetization? | Premium, free, or none. If any, cosmetics only, no pay-to-win |
-| 5 | First person, third person, or isometric camera in the outer world? | Proposal: third person with free camera |
-| 6 | How playable are the mini-tycoons? | See §4 |
+| 4 | Monetization? | **Decided:** none |
+| 5 | Camera? | **Decided:** third-person orbit + focus mode on screens |
+| 6 | How playable are the mini-tycoons? | **Decided:** hands-on early, automatable later |
 | 7 | Number of prestige layers? | See §7 |
-| 8 | Art pipeline: custom models, asset packs, or procedural? | Affects the "realistic-like" goal a lot |
-| 9 | License for the code? | Repo owner's choice |
+| 8 | Art pipeline? | **Decided:** CC0 asset packs + procedural |
+| 9 | License? | **Decided:** none needed |

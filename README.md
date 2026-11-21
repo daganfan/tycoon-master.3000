@@ -4,11 +4,24 @@
 
 You start out broke, with nothing but a crusty old PC. You play tycoon games to earn a little cash, then upgrade your gear, expand your space, automate everything and unlock a huge skill tree with tokens you earn along the way. The world looks realistic, the physics don't behave, and you can collect skins and modifiers to make everything sillier.
 
-> 🚧 **Status: pre-production.** The game design is being defined; no game code yet.
+> 🚧 **Status: playable prototype.** The Bedroom phase is playable: 4 mini-tycoons inside TycoonOS, physical cash, tokens, a 27-node skill tree, shop, cosmetics and saves.
+
+## Play / Share / Install
+
+### 🪟 Windows: just download and double-click
+Open the [**Play On Windows**](Play%20On%20Windows/) folder, download **both** `TycoonMaster3000.exe` and `resources.neu` into the same folder, and double-click the `.exe`. Nothing to install (Windows 10/11). If SmartScreen warns, click *More info → Run anyway*. Rebuild it with `bash scripts/build-windows.sh`.
+
+- **Play in the browser:** https://daganfan.github.io/tycoon-master.3000/ (once GitHub Pages is switched on, see below). Works in Chrome, Edge, Firefox and Safari, on desktop and mobile, and keeps working offline after the first visit.
+- **Install it as an app:** use the **Install** icon in the address bar (Chrome/Edge), **Add to Home Screen** (iPhone/iPad/Android) or **File → Add to Dock** (Safari on Mac).
+- **Desktop downloads:** Windows installer/portable `.exe`, Mac `.dmg` and Linux AppImage are built by the **Desktop builds** workflow in the Actions tab.
+- **Share elsewhere:** `npm run package:web` makes a zip ready for itch.io or Netlify.
+- **Play with friends:** click **👥 Multiplayer → Host a room** and send the link. Friends just open it; no accounts, no server. See **[docs/MULTIPLAYER.md](docs/MULTIPLAYER.md)**.
+
+👉 Step-by-step guide (no coding needed): **[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)**
 
 ## Highlights
 
-- 🎮 **Nested gameplay:** play many original mini-tycoons on in-world machines, and their profits fund your real empire.
+- 🎮 **Nested gameplay:** play original mini-tycoons inside **TycoonOS** on in-world screens, and their profits fund your real empire. 30 games planned (~20 hours).
 - 🌳 **Huge skill tree:** 150+ nodes, unlocked with five token types (Grind, Mogul, Chaos, Pixel, Golden).
 - 🏠 **Grow from a bedroom to a tower:** Bedroom → Garage → LAN Café → Indie Studio → Tycoon Tower → ???
 - 🪙 **Quirky physics:** cash is physical, furniture tips over, and mayhem earns you Chaos Tokens.
@@ -20,27 +33,77 @@ You start out broke, with nothing but a crusty old PC. You play tycoon games to 
 | Doc | What's inside |
 |---|---|
 | [Game Design Document](docs/GAME_DESIGN.md) | Full concept: loop, economy, tokens, skill tree, style, physics, MVP scope |
+| [Implementation Plan](docs/IMPLEMENTATION_PLAN.md) | MVP architecture, systems, milestones, tests, risks |
 | [Roadmap](docs/ROADMAP.md) | Milestones from prototype to release |
+| [Sharing & Installing](docs/DISTRIBUTION.md) | Web link, installable app, desktop downloads, itch.io |
+| [Multiplayer](docs/MULTIPLAYER.md) | Inviting friends into your room, how it works, limits, privacy |
 | [Contributing](CONTRIBUTING.md) | Branching, commits and conventions |
 | [Changelog](CHANGELOG.md) | Notable changes |
 
-## Tech Stack (proposed)
+## Running It
 
-TypeScript · Three.js (rendering) · Rapier (physics) · Vite (build), browser first.
-*Not final. See [GDD §10](docs/GAME_DESIGN.md#10-scope-and-platform).*
+Requires Node 22+.
+
+```bash
+npm install
+npm run dev        # http://localhost:5173
+```
+
+| Command | What it does |
+|---|---|
+| `npm run dev` | Dev server with hot reload |
+| `npm run build` | Production build into `dist/` |
+| `npm test` | Unit tests + headless balance (pacing) tests |
+| `npm run e2e` | Browser smoke test (Playwright) |
+| `npm run balance` | Print a simulated bot playthrough |
+| `npm run check` | Typecheck + lint + tests + build |
+| `npm run package:web` | Zip the web build for itch.io / Netlify |
+| `npm run desktop` | Run the desktop (Electron) app locally |
+| `npm run desktop:build` | Package desktop installers into `release/` |
+
+Add `?fresh` to the URL to start a new game without touching your save.
+
+## Controls
+
+| Key | Action |
+|---|---|
+| Click the room | Capture the mouse (mouse look); Esc frees the cursor |
+| Mouse | Look around (sensitivity, invert Y and FOV in Settings → Controls) |
+| V | Switch first-person / third-person (over-the-shoulder) camera |
+| WASD / arrows | Walk relative to the camera (Shift to sprint, Space to jump) |
+| Scroll | Zoom the third-person camera (while carrying: move it closer / further) |
+| E or click a screen | Use the screen under the crosshair (or the nearest one) |
+| Hold left mouse / G | Grab what the crosshair is on; release to throw, right-click / G to drop |
+| R | Stand a toppled thing back up |
+| Esc | Step back from a screen (click the room to capture the mouse again) |
+| Right-drag (or touch-drag) | Look around when the mouse can't be captured |
+| T | Skill tree |
+| F | Flop over (mayhem!) |
+| Enter | Chat (multiplayer) |
+| 1 / 2 / 3 | Wave / dance / flop emote (multiplayer) |
+
+## Tech Stack
+
+TypeScript · Three.js (rendering) · Rapier (physics) · Svelte 5 (HUD) · Vite (build), browser first.
+See the [Implementation Plan](docs/IMPLEMENTATION_PLAN.md) for the architecture.
 
 ## Repository Layout
 
 ```
 .
-├── docs/            Design docs and roadmap
-├── README.md
-├── CONTRIBUTING.md
-└── CHANGELOG.md
+├── src/
+│   ├── core/        Loop, events, RNG, big numbers, stats pipeline
+│   ├── sim/         Pure game simulation (economy, tokens, tree, tycoons, saves)
+│   ├── content/     Data: items, skill nodes, cosmetics, quests
+│   ├── os/          TycoonOS: canvas UI toolkit, desktop, apps, game views
+│   ├── world/       Three.js + Rapier: room, props, cash, avatar, camera
+│   ├── net/         Multiplayer: P2P transport, protocol, replication, sessions
+│   └── ui/          Svelte HUD and skill tree overlay
+├── tests/           unit/, sim/ (balance), e2e/ (Playwright)
+├── scripts/         Dev scripts (balance report)
+└── docs/            Design docs, plan, roadmap
 ```
-
-Source folders (`src/`, `assets/`, `tests/`) will be added once the tech stack is confirmed.
 
 ## License
 
-Not chosen yet. Until a license is added, all rights are reserved by the repository owner.
+No license. All rights reserved by the repository owner.

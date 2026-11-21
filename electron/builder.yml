@@ -1,0 +1,55 @@
+# electron-builder config. Run `npm run desktop:build` (after `npm run build`).
+appId: com.tycoonmaster3000.game
+productName: Tycoon Master 3000
+copyright: Copyright © Tycoon Master 3000
+directories:
+  output: release
+  buildResources: electron/resources
+files:
+  - dist/**/*
+  - electron/main.cjs
+  - electron/resources/icon.png
+  - package.json
+  # The game is fully bundled into dist/, so no node_modules are shipped.
+  - '!node_modules/**/*'
+asar: true
+icon: electron/resources/icon.png
+artifactName: TycoonMaster3000-${version}-${os}-${arch}.${ext}
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: Tycoon Master 3000
+  artifactName: TycoonMaster3000-${version}-Setup.${ext}
+portable:
+  artifactName: TycoonMaster3000-${version}-Portable.${ext}
+
+mac:
+  category: public.app-category.simulation-games
+  target:
+    - target: dmg
+      arch: [universal]
+  identity: null # unsigned: friends right-click → Open the first time
+dmg:
+  artifactName: TycoonMaster3000-${version}-mac.${ext}
+
+linux:
+  category: Game
+  syncDesktopName: true
+  target:
+    - target: AppImage
+      arch: [x64]
+  synopsis: A tycoon game about playing tycoon games.
+appImage:
+  artifactName: TycoonMaster3000-${version}-linux-x86_64.${ext}
+
+publish: null

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Tycoon Master 3000</title>
+    <meta name="description" content="A tycoon game about playing tycoon games. Free to play in your browser." />
+    <meta name="theme-color" content="#08090d" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="TM3000" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="icon" href="./favicon-32.png" type="image/png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <meta property="og:title" content="Tycoon Master 3000" />
+    <meta property="og:description" content="A tycoon game about playing tycoon games." />
+    <meta property="og:type" content="website" />
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #08090d; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; }
+      #scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; }
+      #app { position: fixed; inset: 0; pointer-events: none; }
+      #app > * { pointer-events: auto; }
+    </style>
+  </head>
+  <body>
+    <canvas id="scene" tabindex="0"></canvas>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
