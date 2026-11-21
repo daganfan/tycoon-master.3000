@@ -15,4 +15,12 @@ export const ui = $state<{
   unfocus?: () => void;
   /** Return all furniture/props to their home spots. */
   tidy?: () => void;
-}>({ loading: 'Booting up…', hint: '', focused: false, tree: false, modal: null });
+  /** Crosshair context hint ('' = nothing in view). */
+  aimHint: string;
+  /** Mouse captured (pointer lock) / pointer lock usable at all. */
+  locked: boolean;
+  lockable: boolean;
+  /** Capture / free the mouse. */
+  capture?: () => void;
+  releasePointer?: () => void;
+}>({ loading: 'Booting up…', hint: '', focused: false, tree: false, modal: null, aimHint: '', locked: false, lockable: false });

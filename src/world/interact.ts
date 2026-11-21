@@ -17,6 +17,10 @@ export interface InteractHost {
   readonly yaw: number;
   /** Meshes that are screens: clicking them focuses the screen instead of grabbing. */
   screenMeshes(): THREE.Object3D[];
+  /** Crosshair targeting: the grabbable prop under the centre of view (within reach), if any. */
+  aimProp?(): { obj: PhysObj; point: THREE.Vector3 } | null;
+  /** Where a carried object should float at `dist` (e.g. in front of the eyes in first person); null = in front of the avatar. */
+  holdPoint?(dist: number): THREE.Vector3 | null;
 }
 
 interface Tween {
@@ -100,14 +104,14 @@ export class Interact {
 
   /* ------------------------------------------------------------ input */
 
-  /** Left mouse down: grab the prop under the cursor if it's within reach. */
-  pointerDown(e: PointerEvent): boolean {
+  /** Left mouse down: grab the prop under the crosshair (or the cursor) if it's within reach. */
+  pointerDown(e: PointerEvent, crosshair = false): boolean {
     if (this.held && e.button === 2) {
       this.release(false);
       return true;
     }
     if (e.button !== 0 || this.held) return false;
-    const hit = this.pick(e);
+    const hit = crosshair ? (this.w.aimProp?.() ?? null) : this.pick(e);
     if (!hit) return false;
     this.grab(hit.obj, hit.point, true);
     return true;
@@ -130,13 +134,16 @@ export class Interact {
   /** G: grab the thing in front of you, or drop what you hold. */
   toggleGrab(): void {
     if (this.held) return this.release(false);
+    const aimed = this.w.aimProp?.();
+    if (aimed) return this.grab(aimed.obj, aimed.point, false);
     const o = this.inFront();
     if (o) this.grab(o, o.body.translation(), false);
   }
 
   /** R: stand the nearest toppled object back upright where it lies. */
   uprightNearest(): boolean {
-    const o = this.nearestToppled();
+    const aimed = this.w.aimProp?.()?.obj;
+    const o = aimed && up(aimed).y <= 0.9 && !this.tweens.some((t) => t.obj === aimed) ? aimed : this.nearestToppled();
     if (!o) return false;
     if (this.held?.obj === o) this.release(false);
     this.tweenTo(o, this.uprightPose(o), 0.45, 0, 0.25);
@@ -259,6 +266,8 @@ export class Interact {
   }
 
   private holdTarget(): THREE.Vector3 {
+    const anchored = this.w.holdPoint?.(this.holdDist);
+    if (anchored) return anchored;
     const p = this.w.avatar.position;
     return p.add(this.forward().multiplyScalar(this.holdDist)).add(new THREE.Vector3(0, 0.3, 0));
   }

@@ -67,10 +67,16 @@ Add `?fresh` to the URL to start a new game without touching your save.
 
 | Key | Action |
 |---|---|
-| WASD / arrows | Walk (Shift to sprint, Space to jump) |
-| Drag mouse / scroll | Orbit / zoom camera |
-| E or click a screen | Use the nearest screen (TycoonOS) |
-| Esc | Step back from a screen |
+| Click the room | Capture the mouse (mouse look); Esc frees the cursor |
+| Mouse | Look around (sensitivity, invert Y and FOV in Settings → Controls) |
+| V | Switch first-person / third-person (over-the-shoulder) camera |
+| WASD / arrows | Walk relative to the camera (Shift to sprint, Space to jump) |
+| Scroll | Zoom the third-person camera (while carrying: move it closer / further) |
+| E or click a screen | Use the screen under the crosshair (or the nearest one) |
+| Hold left mouse / G | Grab what the crosshair is on; release to throw, right-click / G to drop |
+| R | Stand a toppled thing back up |
+| Esc | Step back from a screen (click the room to capture the mouse again) |
+| Right-drag (or touch-drag) | Look around when the mouse can't be captured |
 | T | Skill tree |
 | F | Flop over (mayhem!) |
 | Enter | Chat (multiplayer) |

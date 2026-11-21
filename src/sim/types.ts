@@ -157,6 +157,12 @@ export interface Settings {
   reducedMotion: boolean;
   /** Graphics preset: auto | low | medium | high | ultra. */
   quality: 'auto' | 'low' | 'medium' | 'high' | 'ultra';
+  /** Controls: camera mode (V toggles), mouse sensitivity multiplier, invert Y, vertical FOV in degrees, head bob. */
+  camMode: 'third' | 'first';
+  mouseSens: number;
+  invertY: boolean;
+  fov: number;
+  headBob: boolean;
 }
 
 /** Saved pose of a physical prop: current position/rotation and its "home" (where it was last placed). */

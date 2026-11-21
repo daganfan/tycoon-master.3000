@@ -100,6 +100,8 @@ async function boot(): Promise<void> {
   ui.focusMain = () => world.focusMain();
   ui.unfocus = () => world.setFocus(null);
   ui.tidy = () => world.tidyAll();
+  ui.capture = () => world.controls.capture();
+  ui.releasePointer = () => world.controls.release();
   ui.loading = '';
   const net = await import('@/net/session');
   if (guest) net.attachGuest(guest, game, world);
@@ -112,6 +114,9 @@ async function boot(): Promise<void> {
     (_a, frameDt) => {
       world.update(frameDt);
       ui.hint = world.hint;
+      ui.aimHint = world.aimHint;
+      ui.locked = world.controls.locked;
+      ui.lockable = world.controls.lockable;
     },
   );
   loop.start();

@@ -50,6 +50,10 @@
   });
 
   let mpOpen = $state(false);
+  // Free the mouse whenever a panel needs the cursor.
+  $effect(() => {
+    if (ui.tree || ui.modal || mpOpen) ui.releasePointer?.();
+  });
   let importText = $state('');
   let copied = $state(false);
 </script>
@@ -81,6 +85,17 @@
 {/if}
 
 {#if !ui.loading}
+
+  {#if !ui.focused && !ui.tree}
+    <div class="crosshair" class:on={!!ui.aimHint} data-testid="crosshair"></div>
+    {#if ui.aimHint}<div class="aim-hint" data-testid="aim-hint">{ui.aimHint}</div>{/if}
+    {#if ui.lockable && !ui.locked && !ui.modal && !mpOpen}
+      <div class="click-to-play" data-testid="click-to-play">
+        <strong>🖱️ Click to play</strong>
+        <span>Mouse looks around · Esc frees the cursor · V switches 1st / 3rd person</span>
+      </div>
+    {/if}
+  {/if}
 
   <div class="hint">{ui.hint}</div>
 
@@ -215,6 +230,69 @@
     border-radius: 20px;
     font-size: 14px;
     white-space: nowrap;
+  }
+  .crosshair {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    width: 4px;
+    height: 4px;
+    margin: -2px 0 0 -2px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 0 0 1px #0008;
+    pointer-events: none !important; /* #app > * turns pointer events back on */
+    transition:
+      width 0.1s,
+      height 0.1s,
+      margin 0.1s;
+  }
+  .crosshair.on {
+    width: 12px;
+    height: 12px;
+    margin: -6px 0 0 -6px;
+    background: transparent;
+    border: 2px solid #ffd24a;
+    box-shadow: 0 0 0 1px #0006;
+    box-sizing: border-box;
+  }
+  .aim-hint {
+    position: fixed;
+    left: 50%;
+    top: calc(50% + 18px);
+    transform: translateX(-50%);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+    background: rgba(0, 0, 0, 0.5);
+    padding: 3px 10px;
+    border-radius: 12px;
+    white-space: nowrap;
+    pointer-events: none !important; /* #app > * turns pointer events back on */
+  }
+  .click-to-play {
+    position: fixed;
+    left: 50%;
+    top: 34%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    color: #fff;
+    background: rgba(12, 14, 20, 0.66);
+    border: 1px solid #ffffff33;
+    border-radius: 14px;
+    padding: 12px 20px;
+    pointer-events: none !important; /* #app > * turns pointer events back on */
+    text-align: center;
+  }
+  .click-to-play strong {
+    font-size: 20px;
+  }
+  .click-to-play span {
+    font-size: 13px;
+    opacity: 0.8;
   }
   .buttons {
     position: fixed;

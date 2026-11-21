@@ -309,13 +309,18 @@ const skills: OsApp = {
   },
 };
 
+let settingsTab: 'general' | 'controls' = 'general';
+
 const settings: OsApp = {
   id: 'settings',
   title: 'Settings',
   icon: '⚙️',
   draw(ui, r, os) {
     const st = os.game.state.settings;
-    let y = r.y + 10;
+    const [tg, tc] = splitH({ x: r.x, y: r.y, w: Math.min(r.w, 420), h: 38 }, Math.min(r.w, 420) / 2 - 4, 8);
+    if (ui.button(tg, '⚙️ General', { size: 15, primary: settingsTab === 'general' })) settingsTab = 'general';
+    if (ui.button(tc, '🎮 Controls', { size: 15, primary: settingsTab === 'controls' })) settingsTab = 'controls';
+    let y = r.y + 52;
     const row = (label: string, value: string, minus: () => void, plus: () => void) => {
       ui.text(label, r.x, y + 20, { size: 17, bold: true });
       ui.text(value, r.x + r.w - 130, y + 20, { size: 16, align: 'center' });
@@ -324,6 +329,20 @@ const settings: OsApp = {
       y += 54;
     };
     const clamp = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 10) / 10;
+    if (settingsTab === 'controls') {
+      const sens = (v: number) => Math.round(Math.max(0.2, Math.min(3, v)) * 10) / 10;
+      const fov = (v: number) => Math.max(45, Math.min(90, v));
+      const first = st.camMode === 'first';
+      const flip = () => (st.camMode = first ? 'third' : 'first');
+      row('Camera (V)', first ? '1st person' : '3rd person', flip, flip);
+      row('Mouse sensitivity', `x${(st.mouseSens ?? 1).toFixed(1)}`, () => (st.mouseSens = sens((st.mouseSens ?? 1) - 0.1)), () => (st.mouseSens = sens((st.mouseSens ?? 1) + 0.1)));
+      row('Invert mouse Y', st.invertY ? 'On' : 'Off', () => (st.invertY = false), () => (st.invertY = true));
+      row('Field of view', `${st.fov ?? 60}°`, () => (st.fov = fov((st.fov ?? 60) - 5)), () => (st.fov = fov((st.fov ?? 60) + 5)));
+      row('Head bob (1st person)', st.headBob ? 'On' : 'Off', () => (st.headBob = false), () => (st.headBob = true));
+      ui.text('Click the room to capture the mouse · Esc frees it', r.x, y + 16, { size: 14, color: ui.theme.muted, maxWidth: r.w });
+      ui.text('Capture blocked? Hold the right mouse button to look', r.x, y + 38, { size: 14, color: ui.theme.muted, maxWidth: r.w });
+      return;
+    }
     row('Wallpaper', `#${st.wallpaper + 1}`, () => (st.wallpaper = (st.wallpaper + 4) % 5), () => (st.wallpaper = (st.wallpaper + 1) % 5));
     row('Physics chaos (comfort)', `${Math.round(st.comfort * 100)}%`, () => (st.comfort = clamp(st.comfort - 0.1)), () => (st.comfort = clamp(st.comfort + 0.1)));
     row('Volume', `${Math.round(st.volume * 100)}%`, () => (st.volume = clamp(st.volume - 0.1)), () => (st.volume = clamp(st.volume + 0.1)));

@@ -57,7 +57,7 @@ export function createInitialState(seed = Date.now() >>> 0, now = Date.now()): G
     counters: {},
     quests: [],
     flags: [],
-    settings: { comfort: 1, volume: 0.6, wallpaper: 0, reducedMotion: false, quality: 'auto' },
+    settings: { comfort: 1, volume: 0.6, wallpaper: 0, reducedMotion: false, quality: 'auto', camMode: 'third', mouseSens: 1, invertY: false, fov: 60, headBob: false },
     layout: {},
     garage: createGarageState(),
   };

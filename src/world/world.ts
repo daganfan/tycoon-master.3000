@@ -17,7 +17,8 @@ import { ChaosDetector } from './chaos';
 import { CosmeticFx } from './cosmeticFx';
 import type { NetHooks } from './remote';
 import { Garage } from './garage/garage';
-import { clampCamera } from './garage/areas';
+import { CameraRig, facingForYaw, lookDir, nextMode, type CamMode } from './camera';
+import { Controls, GRAB_REACH, aimAt, type AimHit } from './controls';
 
 interface ScreenEntry {
   os: TycoonOS;
@@ -31,7 +32,7 @@ interface ScreenEntry {
 }
 
 const AUX_APPS = ['taskmgr', 'wallet', 'mail'];
-const FOV = 55;
+const FOV = 60;
 
 /** The 3D bedroom: rendering, physics, camera, input and screens. */
 export class World {
@@ -42,23 +43,25 @@ export class World {
   readonly screens: ScreenEntry[] = [];
   readonly props: PhysObj[] = [];
   hint = '';
+  /** Context hint next to the crosshair ('' = nothing interactable in view). */
+  aimHint = '';
+  /** What the crosshair is on this frame. */
+  aim: AimHit | null = null;
   gfx!: Graphics;
   lighting: Lighting | null = null;
   focus: ScreenEntry | null = null;
   onFocusChange: (focused: boolean) => void = () => {};
   /** Multiplayer session hooks (src/net); null when playing alone. */
   netHooks: NetHooks | null = null;
-  private focusBlend = 0;
-  private cam = { yaw: 0, pitch: 0.32, dist: 2.4 };
-  private keys = new Set<string>();
-  private drag: { x: number; y: number; moved: boolean; button: number } | null = null;
+  /** First / third-person camera (src/world/camera.ts). */
+  readonly rig: CameraRig;
+  /** Keyboard, mouse and pointer lock (src/world/controls.ts). */
+  controls!: Controls;
   private raycaster = new THREE.Raycaster();
   private time = 0;
   readonly interact: Interact;
   readonly chaos: ChaosDetector;
   private spinners: THREE.Object3D[] = [];
-  private tpPos = new THREE.Vector3();
-  private tpQuat = new THREE.Quaternion();
   private fx?: CosmeticFx;
   /** Phase 2: the garage behind the bedroom door. */
   garage?: Garage;
@@ -74,14 +77,49 @@ export class World {
     renderer: THREE.WebGLRenderer,
   ) {
     this.renderer = renderer;
+    this.rig = new CameraRig({
+      camera: this.camera,
+      avatar,
+      phys,
+      settings: () => game.state.settings,
+      heldBody: () => this.interact.held?.obj.body ?? null,
+    });
+    this.rig.mode = game.state.settings.camMode === 'first' ? 'first' : 'third';
     this.interact = new Interact(this);
     this.chaos = new ChaosDetector(game, avatar, (o) => this.interact.busy(o), () => this.sfx.thud());
     for (const id of ['desk', 'pc', 'monitor', 'chair'] as const) this.interact.register(room[id], id);
   }
 
-  /** Camera orbit yaw (used by grab/carry to know what's "in front"). */
+  /** Camera yaw (used by grab/carry to know what's "in front"). */
   get yaw(): number {
-    return this.cam.yaw;
+    return this.rig.look.yaw;
+  }
+
+  get camMode(): CamMode {
+    return this.rig.mode;
+  }
+
+  /** Switch first / third person (V, Settings). Remembered in the save. */
+  setCamMode(m: CamMode): void {
+    this.game.state.settings.camMode = m;
+    this.rig.setMode(m);
+  }
+
+  toggleCamMode(): void {
+    this.setCamMode(nextMode(this.rig.mode));
+  }
+
+  /** Crosshair targeting for grab/carry. */
+  aimProp(): { obj: PhysObj; point: THREE.Vector3 } | null {
+    const a = this.aim;
+    return a && a.kind !== 'door' && a.obj.kind !== 'avatar' && a.obj.body.isDynamic() && a.dist <= GRAB_REACH ? { obj: a.obj, point: a.point } : null;
+  }
+
+  /** First person: carried things float in front of your eyes, following the view pitch. */
+  holdPoint(dist: number): THREE.Vector3 | null {
+    if (this.rig.mode !== 'first') return null;
+    const d = lookDir(this.rig.look.yaw, Math.max(-0.9, Math.min(1.1, this.rig.look.pitch)));
+    return this.rig.eye().addScaledVector(d, dist).add(new THREE.Vector3(0, -0.12, 0));
   }
 
   screenMeshes(): THREE.Object3D[] {
@@ -282,73 +320,59 @@ export class World {
   /* ------------------------------------------------------------ input */
 
   private bindInput(): void {
-    const c = this.canvas;
     window.addEventListener('resize', () => this.resize());
-    window.addEventListener('keydown', (e) => {
-      if ((e.target as HTMLElement)?.tagName === 'INPUT' || (e.target as HTMLElement)?.tagName === 'TEXTAREA') return;
-      this.keys.add(e.code);
-      if (e.code === 'KeyE') this.toggleFocus();
-      if (e.code === 'Escape' && this.focus) this.setFocus(null);
-      if (e.code === 'KeyF' && !this.focus) this.chaos.tryFlop();
-      if (e.code === 'KeyG' && !this.focus) this.interact.toggleGrab();
-      if (e.code === 'KeyR' && !this.focus) this.interact.uprightNearest();
-      if (e.code === 'Space') e.preventDefault();
-    });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    window.addEventListener('blur', () => this.keys.clear());
-    c.addEventListener('contextmenu', (e) => e.preventDefault());
-    c.addEventListener('pointerdown', (e) => {
-      // Grabbing a prop: mouse movement keeps aiming the camera, release throws/drops.
-      const grabbed = !this.focus && this.interact.pointerDown(e);
-      this.drag = { x: e.clientX, y: e.clientY, moved: grabbed, button: e.button };
-      c.setPointerCapture(e.pointerId);
-    });
-    c.addEventListener('pointermove', (e) => {
-      if (this.focus) {
+    this.controls = new Controls({
+      canvas: this.canvas,
+      focused: () => !!this.focus,
+      look: (dx, dy) => this.rig.turn(dx, dy),
+      key: (code) => this.onKey(code),
+      worldDown: (e, crosshair) => {
+        if (crosshair && e.button === 0 && !this.interact.held && this.aim?.kind === 'screen') {
+          this.setFocus(this.screens[this.aim.index] ?? null);
+          return true;
+        }
+        return this.interact.pointerDown(e, crosshair);
+      },
+      worldUp: (e) => this.interact.pointerUp(e),
+      worldClick: (e, crosshair) => {
+        if (crosshair) {
+          if (this.aim?.kind === 'screen') this.setFocus(this.screens[this.aim.index] ?? null);
+          return;
+        }
+        // Click a nearby screen to use it.
+        const hit = this.pickScreen(e);
+        if (hit && hit.dist < 2.6) this.setFocus(hit.screen);
+      },
+      screenMove: (e) => {
+        if (!this.focus) return;
         const uv = this.screenUv(e, this.focus);
         if (uv && !this.netScreen('move', uv)) this.focus.os.pointerMove(uv.x, uv.y);
-        c.style.cursor = this.focus.os.ui.hovering ? 'pointer' : 'default';
-      }
-      if (!this.drag) return;
-      const dx = e.clientX - this.drag.x;
-      const dy = e.clientY - this.drag.y;
-      if (Math.abs(dx) + Math.abs(dy) > 4) this.drag.moved = true;
-      if (this.drag.moved && !this.focus) {
-        this.cam.yaw -= dx * 0.006;
-        this.cam.pitch = Math.max(-0.2, Math.min(1.2, this.cam.pitch + dy * 0.005));
-        this.drag.x = e.clientX;
-        this.drag.y = e.clientY;
-      }
-    });
-    c.addEventListener('pointerup', (e) => {
-      const d = this.drag;
-      this.drag = null;
-      if (this.interact.pointerUp(e)) return;
-      if (!d || d.moved) return;
-      if (this.focus) {
+        this.canvas.style.cursor = this.focus.os.ui.hovering ? 'pointer' : 'default';
+      },
+      screenClick: (e) => {
+        if (!this.focus) return;
         const uv = this.screenUv(e, this.focus);
         if (uv) {
           if (!this.netScreen('click', uv)) this.focus.os.click(uv.x, uv.y);
           this.sfx.click();
-        } else if (d.button === 0) this.setFocus(null);
-        return;
-      }
-      // Click a nearby screen to use it.
-      const hit = this.pickScreen(e);
-      if (hit && hit.dist < 2.6) this.setFocus(hit.screen);
-    });
-    c.addEventListener(
-      'wheel',
-      (e) => {
-        e.preventDefault();
-        if (this.focus) {
-          if (!this.netScreen('wheel', { x: 0, y: e.deltaY })) this.focus.os.wheel(e.deltaY);
-        }
-        else if (this.interact.wheel(e.deltaY)) return;
-        else this.cam.dist = Math.max(1.1, Math.min(4.5, this.cam.dist * (1 + Math.sign(e.deltaY) * 0.1)));
+        } else if (e.button === 0) this.setFocus(null);
       },
-      { passive: false },
-    );
+      wheel: (dy) => {
+        if (this.focus) {
+          if (!this.netScreen('wheel', { x: 0, y: dy })) this.focus.os.wheel(dy);
+        } else if (!this.interact.wheel(dy) && this.rig.mode === 'third') this.rig.zoom(dy);
+      },
+    });
+  }
+
+  private onKey(code: string): void {
+    if (code === 'KeyE') this.toggleFocus();
+    if (code === 'Escape' && this.focus) this.setFocus(null, false);
+    if (this.focus) return;
+    if (code === 'KeyV') this.toggleCamMode();
+    if (code === 'KeyF') this.chaos.tryFlop();
+    if (code === 'KeyG') this.interact.toggleGrab();
+    if (code === 'KeyR') this.interact.uprightNearest();
   }
 
   /** Multiplayer: let the net session take screen input (visitors forward it to the host). */
@@ -393,18 +417,24 @@ export class World {
 
   private toggleFocus(): void {
     if (this.focus) return this.setFocus(null);
-    const s = this.nearestScreen();
+    const aimed = this.aim?.kind === 'screen' ? this.screens[this.aim.index] : undefined;
+    const s = aimed ?? this.nearestScreen();
     if (s) this.setFocus(s);
   }
 
-  setFocus(s: ScreenEntry | null): void {
+  /**
+   * Zoom onto a screen (null = step back). Focusing frees the mouse for TycoonOS;
+   * stepping back re-captures it when the browser allows (click / key), otherwise
+   * the "Click to play" overlay asks for a click.
+   */
+  setFocus(s: ScreenEntry | null, recapture = true): void {
     if (s && s.os.screen === 'off') s.os.boot();
-    if (!this.focus && s) {
-      this.tpPos.copy(this.camera.position);
-      this.tpQuat.copy(this.camera.quaternion);
-    }
     this.focus = s;
-    if (s) this.lastFocusEntry = s;
+    if (s) {
+      this.lastFocusEntry = s;
+      this.controls?.release();
+    } else if (recapture) this.controls?.capture();
+    this.controls?.reset();
     this.canvas.style.cursor = 'default';
     this.onFocusChange(!!s);
   }
@@ -430,14 +460,18 @@ export class World {
     const comfort = this.game.state.settings.comfort;
 
     // Movement relative to the camera
-    const k = this.keys;
-    const f = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0);
-    const r = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
-    const fwd = new THREE.Vector3(-Math.sin(this.cam.yaw), 0, -Math.cos(this.cam.yaw));
+    const ctl = this.controls;
+    const mode = this.game.state.settings.camMode === 'first' ? 'first' : 'third';
+    if (mode !== this.rig.mode) this.rig.setMode(mode);
+    const { f, r } = ctl.axes();
+    const yaw = this.rig.look.yaw;
+    const fwd = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
     const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
     const move = fwd.multiplyScalar(f).add(right.multiplyScalar(r));
     if (move.lengthSq() > 1) move.normalize();
-    this.avatar.update(dt, move, k.has('ShiftLeft') || k.has('ShiftRight'), k.has('Space'), !this.focus);
+    // First person (and while carrying) the body turns with the view; otherwise it faces where it walks.
+    const face = !this.focus && (mode === 'first' || this.interact.held) ? facingForYaw(yaw) : undefined;
+    this.avatar.update(dt, move, ctl.sprint, ctl.jump, !this.focus, face);
     this.interact.update(dt);
     this.garage?.update(dt);
 
@@ -470,6 +504,11 @@ export class World {
       }
     }
 
+    this.rig.update(dt, this.focus, this.lastFocusEntry);
+    this.avatar.setView(this.rig.avatarView());
+    this.avatar.lookTarget = this.rig.mode === 'first' ? null : this.camera.position;
+    this.updateAim();
+
     // Hint text
     const near = this.nearestScreen();
     const extra = this.focus ? '' : this.garage?.hint() || this.interact.hint() || this.chaos.hint();
@@ -481,11 +520,10 @@ export class World {
         ? near.os.screen === 'off'
           ? 'E — power on the crusty PC'
           : 'E — use this screen'
-        : 'WASD move · Shift sprint · Space jump · F flop · G grab · R stand up · T skills';
+        : 'WASD move · Mouse look · V camera · Shift sprint · Space jump · F flop · G grab · T skills';
 
-    this.updateCamera(dt);
     this.gfx.setQuality((this.game.state.settings.quality ?? 'auto') as Quality);
-    this.gfx.setFocus(this.focusBlend);
+    this.gfx.setFocus(this.rig.focusBlend);
     this.gfx.render(dt);
   }
 
@@ -503,37 +541,30 @@ export class World {
     }
   }
 
-  private updateCamera(dt: number): void {
-    const target = this.avatar.position.add(new THREE.Vector3(0, 0.55, 0));
-    const { yaw, pitch, dist } = this.cam;
-    const tp = new THREE.Vector3(target.x + Math.sin(yaw) * Math.cos(pitch) * dist, target.y + Math.sin(pitch) * dist, target.z + Math.cos(yaw) * Math.cos(pitch) * dist);
-    // keep the camera inside the room
-    clampCamera(tp, target, this.phys);
-    const tq = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(tp, target, new THREE.Vector3(0, 1, 0)));
-    const blendTarget = this.focus ? 1 : 0;
-    const prev = this.focusBlend;
-    this.focusBlend += Math.sign(blendTarget - this.focusBlend) * Math.min(Math.abs(blendTarget - this.focusBlend), dt * 2.2);
-    if (prev === 0 && this.focusBlend === 0) {
-      this.camera.position.lerp(tp, 1 - Math.pow(0.0001, dt));
-      this.camera.quaternion.slerp(tq, 1 - Math.pow(0.0001, dt));
-      this.tpPos.copy(this.camera.position);
-      this.tpQuat.copy(this.camera.quaternion);
+  /** Centre-of-view target and its crosshair hint. */
+  private updateAim(): void {
+    if (this.focus || this.rig.focusBlend > 0.05) {
+      this.aim = null;
+      this.aimHint = '';
       return;
     }
-    const s = this.focus ?? this.lastFocus();
-    if (!s) return;
-    const center = s.mesh.getWorldPosition(new THREE.Vector3());
-    const q = s.mesh.getWorldQuaternion(new THREE.Quaternion());
-    const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
-    const tan = Math.tan(THREE.MathUtils.degToRad(FOV / 2));
-    const d = Math.max(s.h / 2 / tan, s.w / 2 / (tan * this.camera.aspect)) * 1.14;
-    const fp = center.clone().add(normal.multiplyScalar(d));
-    const fq = q;
-    const t = this.focusBlend * this.focusBlend * (3 - 2 * this.focusBlend);
-    this.tpPos.lerp(tp, 1 - Math.pow(0.0001, dt));
-    this.tpQuat.slerp(tq, 1 - Math.pow(0.0001, dt));
-    this.camera.position.lerpVectors(this.tpPos, fp, t);
-    this.camera.quaternion.slerpQuaternions(this.tpQuat, fq, t);
+    const a = (this.aim = aimAt({
+      camera: this.camera,
+      phys: this.phys,
+      avatar: this.avatar,
+      screenObjs: () => this.screens.map((s) => s.obj),
+      heldObj: () => this.interact.held?.obj ?? null,
+    }));
+    if (!a || this.interact.held) {
+      this.aimHint = '';
+      return;
+    }
+    if (a.kind === 'screen') {
+      this.aimHint = this.screens[a.index]?.os.screen === 'off' ? 'E — power on the PC' : 'E — use screen';
+    } else if (a.kind === 'prop') {
+      const toppled = new THREE.Vector3(0, 1, 0).applyQuaternion(a.obj.mesh.quaternion).y <= 0.9;
+      this.aimHint = this.interact.isHeavy(a.obj) ? 'G — shove' : toppled ? 'R — stand up · G — grab' : 'G — grab';
+    } else this.aimHint = this.game.garage.unlocked() ? '' : '🔒 Locked door — buy the Garage Key in eBuy';
   }
 
   private lastFocusEntry: ScreenEntry | null = null;

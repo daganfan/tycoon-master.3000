@@ -75,7 +75,21 @@ export class Avatar {
     return speed > 2.8;
   }
 
-  update(dt: number, move: THREE.Vector3, sprint: boolean, jump: boolean, enabled: boolean): void {
+  /**
+   * What the local camera should see of us: everything, everything but the head
+   * (first person, so the eye is not inside the skull) or nothing (camera squeezed
+   * against the body). Shadows go with the meshes, which is fine for a teen in a hoodie.
+   */
+  setView(view: 'full' | 'headless' | 'hidden'): void {
+    this.group.visible = view !== 'hidden';
+    this.rig.headPivot.visible = view === 'full';
+  }
+
+  /**
+   * @param face optional facing to turn toward (e.g. the camera direction in first
+   *   person or while carrying); otherwise we turn toward the movement direction.
+   */
+  update(dt: number, move: THREE.Vector3, sprint: boolean, jump: boolean, enabled: boolean, face?: number): void {
     const v = this.body.linvel();
     const onGround = this.grounded();
     this.airTime = onGround ? 0 : this.airTime + dt;
@@ -96,7 +110,15 @@ export class Avatar {
     const blend = onGround ? 0.25 : 0.05;
     this.body.setLinvel({ x: v.x + (target.x - v.x) * blend, y: v.y, z: v.z + (target.z - v.z) * blend }, true);
     if (jump && onGround && enabled) this.body.applyImpulse({ x: 0, y: 4.2 * this.body.mass(), z: 0 }, true);
-    if (move.lengthSq() > 0.01 && enabled) this.facing = Math.atan2(move.x, move.z);
+    let want: number | null = face ?? null;
+    if (want === null && move.lengthSq() > 0.01 && enabled) want = Math.atan2(move.x, move.z);
+    if (want !== null) {
+      // Turn smoothly along the shortest way round (fast enough to feel direct).
+      let d = (want - this.facing) % (Math.PI * 2);
+      if (d > Math.PI) d -= Math.PI * 2;
+      if (d < -Math.PI) d += Math.PI * 2;
+      this.facing += d * (face !== undefined ? 1 - Math.pow(2, -dt / 0.03) : 1 - Math.pow(2, -dt / 0.06));
+    }
     // keep the visual facing direction (body itself does not rotate)
     this.animate(dt, Math.hypot(v.x, v.z));
   }
