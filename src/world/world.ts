@@ -14,6 +14,8 @@ import { Sfx } from './audio';
 import { Interact } from './interact';
 import { ChaosDetector } from './chaos';
 import { CosmeticFx } from './cosmeticFx';
+import { Garage } from './garage/garage';
+import { clampCamera } from './garage/areas';
 
 interface ScreenEntry {
   os: TycoonOS;
@@ -52,6 +54,8 @@ export class World {
   private tpPos = new THREE.Vector3();
   private tpQuat = new THREE.Quaternion();
   private fx?: CosmeticFx;
+  /** Phase 2: the garage behind the bedroom door. */
+  garage?: Garage;
 
   private constructor(
     readonly canvas: HTMLCanvasElement,
@@ -102,6 +106,7 @@ export class World {
     // move built content into the world's scene
     while (scene.children.length) w.scene.add(scene.children[0]!);
     w.setupLights();
+    w.garage = new Garage(w);
     w.setupScreens();
     w.restoreItems();
     w.applyCosmetics();
@@ -450,6 +455,7 @@ export class World {
     if (move.lengthSq() > 1) move.normalize();
     this.avatar.update(dt, move, k.has('ShiftLeft') || k.has('ShiftRight'), k.has('Space'), !this.focus);
     this.interact.update(dt);
+    this.garage?.update(dt);
 
     this.phys.update(dt);
     this.avatar.postSync();
@@ -480,7 +486,7 @@ export class World {
 
     // Hint text
     const near = this.nearestScreen();
-    const extra = this.focus ? '' : this.interact.hint() || this.chaos.hint();
+    const extra = this.focus ? '' : this.garage?.hint() || this.interact.hint() || this.chaos.hint();
     this.hint = this.focus
       ? 'Click the screen to play · Esc / E to step back'
       : extra
@@ -514,9 +520,7 @@ export class World {
     const { yaw, pitch, dist } = this.cam;
     const tp = new THREE.Vector3(target.x + Math.sin(yaw) * Math.cos(pitch) * dist, target.y + Math.sin(pitch) * dist, target.z + Math.cos(yaw) * Math.cos(pitch) * dist);
     // keep the camera inside the room
-    tp.x = THREE.MathUtils.clamp(tp.x, -ROOM.hx + 0.15, ROOM.hx - 0.15);
-    tp.z = THREE.MathUtils.clamp(tp.z, -ROOM.hz + 0.15, ROOM.hz - 0.15);
-    tp.y = THREE.MathUtils.clamp(tp.y, 0.3, ROOM.h - 0.15);
+    clampCamera(tp, target, this.phys);
     const tq = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(tp, target, new THREE.Vector3(0, 1, 0)));
     const blendTarget = this.focus ? 1 : 0;
     const prev = this.focusBlend;

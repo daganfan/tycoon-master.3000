@@ -4,6 +4,8 @@ import type { Physics, PhysObj } from './physics';
 import { fabric, labelTex, posterTex, rug, wallPaint, woodFloor } from './textures';
 
 export const ROOM = { hx: 3, hz: 2.5, h: 2.7 };
+/** The door in the front wall (leads to the garage). */
+export const DOOR = { x: 1.6, w: 0.9, h: 2.05 };
 
 export const mat = (color: string, roughness = 0.6, metalness = 0, extra: Partial<THREE.MeshStandardMaterialParameters> = {}) =>
   new THREE.MeshStandardMaterial({ color, roughness, metalness, ...extra });
@@ -36,6 +38,8 @@ export interface RoomRefs {
   screen: Screen;
   chair: PhysObj;
   garageSign: THREE.Mesh;
+  /** Door pivot (hinge on the -x edge); the garage module swings it open. */
+  door: THREE.Group;
   deskTopY: number;
 }
 
@@ -76,19 +80,26 @@ export function buildRoom(scene: THREE.Scene, phys: Physics): RoomRefs {
 
   // Walls + ceiling
   const wallMat = mat('#ffffff', 0.92, 0, { map: wallPaint(205) });
-  const wall = (w: number, pos: THREE.Vector3, ry: number) => {
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallMat);
+  const wall = (w: number, pos: THREE.Vector3, ry: number, wh = h) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, wh), wallMat);
     m.position.copy(pos);
     m.rotation.y = ry;
     m.receiveShadow = true;
     scene.add(m);
   };
   wall(hx * 2, new THREE.Vector3(0, h / 2, -hz), 0);
-  wall(hx * 2, new THREE.Vector3(0, h / 2, hz), Math.PI);
+  // Front wall with a doorway (to the garage).
+  const dl = DOOR.x - DOOR.w / 2;
+  const dr = DOOR.x + DOOR.w / 2;
+  wall(dl + hx, new THREE.Vector3((dl - hx) / 2, h / 2, hz), Math.PI);
+  wall(hx - dr, new THREE.Vector3((dr + hx) / 2, h / 2, hz), Math.PI);
+  wall(DOOR.w, new THREE.Vector3(DOOR.x, (DOOR.h + h) / 2, hz), Math.PI, h - DOOR.h);
   wall(hz * 2, new THREE.Vector3(-hx, h / 2, 0), Math.PI / 2);
   wall(hz * 2, new THREE.Vector3(hx, h / 2, 0), -Math.PI / 2);
   phys.staticBox({ x: hx, y: h, z: 0.1 }, { x: 0, y: h / 2, z: -hz - 0.1 });
-  phys.staticBox({ x: hx, y: h, z: 0.1 }, { x: 0, y: h / 2, z: hz + 0.1 });
+  phys.staticBox({ x: (dl + hx) / 2, y: h / 2, z: 0.1 }, { x: (dl - hx) / 2, y: h / 2, z: hz + 0.1 });
+  phys.staticBox({ x: (hx - dr) / 2, y: h / 2, z: 0.1 }, { x: (dr + hx) / 2, y: h / 2, z: hz + 0.1 });
+  phys.staticBox({ x: DOOR.w / 2, y: (h - DOOR.h) / 2, z: 0.1 }, { x: DOOR.x, y: (h + DOOR.h) / 2, z: hz + 0.1 });
   phys.staticBox({ x: 0.1, y: h, z: hz }, { x: -hx - 0.1, y: h / 2, z: 0 });
   phys.staticBox({ x: 0.1, y: h, z: hz }, { x: hx + 0.1, y: h / 2, z: 0 });
   phys.staticBox({ x: hx, y: 0.1, z: hz }, { x: 0, y: h + 0.1, z: 0 });
@@ -98,7 +109,7 @@ export function buildRoom(scene: THREE.Scene, phys: Physics): RoomRefs {
   scene.add(ceil);
   // Skirting boards
   const skirt = mat('#efeae0', 0.5);
-  for (const [w, x, z, ry] of [[hx * 2, 0, -hz + 0.01, 0], [hx * 2, 0, hz - 0.01, 0], [hz * 2, -hx + 0.01, 0, Math.PI / 2], [hz * 2, hx - 0.01, 0, Math.PI / 2]] as const) {
+  for (const [w, x, z, ry] of [[hx * 2, 0, -hz + 0.01, 0], [dl + hx, (dl - hx) / 2, hz - 0.01, 0], [hx - dr, (dr + hx) / 2, hz - 0.01, 0], [hz * 2, -hx + 0.01, 0, Math.PI / 2], [hz * 2, hx - 0.01, 0, Math.PI / 2]] as const) {
     const s = new THREE.Mesh(new THREE.BoxGeometry(w, 0.1, 0.02), skirt);
     s.position.set(x, 0.05, z);
     s.rotation.y = ry;
@@ -228,16 +239,20 @@ export function buildRoom(scene: THREE.Scene, phys: Physics): RoomRefs {
   const chairObj = phys.track(chair, chairBody, 'chair', 'props', { restitution: 0.1, friction: 0.5, density: 200 });
 
   // Door + garage teaser sign (front wall)
+  const doorPivot = new THREE.Group();
+  doorPivot.name = 'bedroom-door';
+  doorPivot.position.set(dl, 0, hz - 0.03);
+  scene.add(doorPivot);
   const door = rbox(0.9, 2.05, 0.05, 0.01, mat('#e8e2d4', 0.5));
-  door.position.set(1.6, 1.025, hz - 0.03);
-  scene.add(shadowed(door));
+  door.position.set(DOOR.w / 2, 1.025, 0);
+  doorPivot.add(shadowed(door));
   const knob = new THREE.Mesh(new THREE.SphereGeometry(0.03, 16, 12), mat('#c9a24a', 0.25, 1));
-  knob.position.set(1.95, 1.0, hz - 0.07);
-  scene.add(knob);
+  knob.position.set(0.8, 1.0, -0.04);
+  doorPivot.add(knob);
   const garageSign = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.32), mat('#ffffff', 0.8, 0, { map: labelTex('GARAGE →\n🔒 Key needed', '#ffeb3b', '#222', 512, 320, 54) }));
-  garageSign.position.set(1.6, 1.55, hz - 0.06);
+  garageSign.position.set(DOOR.w / 2, 1.55, -0.03);
   garageSign.rotation.y = Math.PI;
-  scene.add(garageSign);
+  doorPivot.add(garageSign);
 
   // Poster spot + shelf with clutter (static)
   const poster = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.7), mat('#ffffff', 0.7, 0, { map: posterTex('GRIND', '#1d3557', '#ffd166') }));
@@ -261,6 +276,7 @@ export function buildRoom(scene: THREE.Scene, phys: Physics): RoomRefs {
     chair: chairObj,
     screen: { mesh: mon.screen, obj: monitor, w: 0.52, h: 0.36 },
     garageSign,
+    door: doorPivot,
     deskTopY,
   };
 }

@@ -17,7 +17,7 @@ export const BELT = { width: 0.62, top: 0.42 } as const;
 export const FURNACE = { x: 4.95, z: 7.0, hx: 0.62, hz: 1.55 } as const;
 export const TANK = { x: 6.02, z: 7.0, r: 0.36, h: 1.7 } as const;
 export const COLLECT_PAD = { x: 5.55, z: 4.55 } as const;
-export const REBIRTH_PAD = { x: 5.55, z: 3.45 } as const;
+export const REBIRTH_PAD = { x: 0.3, z: 3.45 } as const;
 
 export type ScrapKind = 'cap' | 'duck' | 'phone' | 'sock' | 'gear' | 'crate';
 export type UpgradeFx = 'paint' | 'gold' | 'wrap' | 'hat';
@@ -61,15 +61,15 @@ export const PADS: PadDef[] = [
   { id: 'drop_a3', name: 'Old Phone Dropper', desc: 'Drops cracked phones. Still has 3% battery.', kind: 'dropper', cost: 120000, requires: ['up_paint'], line: 'A',
     pad: { x: 0.55, z: 5.05 }, at: { x: 0.55, z: 6.0 }, dropper: { rate: 0.4, value: 1000, scrap: 'phone' } },
   { id: 'deco_rails', name: 'Safety Rails & Floor Paint', desc: 'Looks legit. Factory income +10%.', kind: 'decor', cost: 90000, requires: ['up_paint'],
-    pad: { x: -2.55, z: 4.2 }, mult: 1.1 },
+    pad: { x: -0.9, z: 3.45 }, mult: 1.1 },
   { id: 'up_gold', name: 'Gold-Plater', desc: 'A thin layer of real-ish gold. Worth x2.', kind: 'upgrader', cost: 400000, requires: ['drop_a3'], line: 'A',
     pad: { x: 2.75, z: 5.05 }, at: { x: 2.75, z: 6.0 }, upgrader: { mult: 2, fx: 'gold' } },
   { id: 'speed_1', name: 'Overclocked Belts', desc: 'Droppers sync to faster belts: +30% drop rate.', kind: 'speed', cost: 650000, requires: ['up_gold'],
-    pad: { x: 4.0, z: 3.4 }, mult: 1.3 },
+    pad: { x: 2.7, z: 3.45 }, mult: 1.3 },
   { id: 'robot', name: 'Robo-Helper', desc: 'Empties the tank for you every 30 s and pays out the coins.', kind: 'robot', cost: 900000, requires: ['up_gold'],
-    pad: { x: 4.4, z: 4.3 } },
+    pad: { x: 4.3, z: 3.45 } },
   { id: 'belt_b', name: 'Conveyor B', desc: 'A second production line.', kind: 'belt', cost: 1500000, requires: ['speed_1'], line: 'B',
-    pad: { x: -2.55, z: 7.0 } },
+    pad: { x: -2.3, z: 7.0 } },
   { id: 'drop_b1', name: 'Lost Sock Dropper', desc: 'Every sock that ever vanished ends up here.', kind: 'dropper', cost: 2200000, requires: ['belt_b'], line: 'B',
     pad: { x: -0.35, z: 7.0 }, at: { x: -0.35, z: 8.0 }, dropper: { rate: 0.5, value: 600, scrap: 'sock' } },
   { id: 'drop_b2', name: 'Gear Dropper', desc: 'Heavy, greasy, valuable gears.', kind: 'dropper', cost: 5000000, requires: ['drop_b1'], line: 'B',
@@ -77,7 +77,7 @@ export const PADS: PadDef[] = [
   { id: 'up_wrap', name: 'Shrink-Wrapper', desc: 'Factory-sealed means collectible. Worth x1.75.', kind: 'upgrader', cost: 6000000, requires: ['drop_b2'], line: 'B',
     pad: { x: 1.55, z: 7.0 }, at: { x: 1.55, z: 8.0 }, upgrader: { mult: 1.75, fx: 'wrap' } },
   { id: 'deco_neon', name: 'Neon Tubes & Disco Ball', desc: 'Workers love it (you are the workers). Factory income +15%.', kind: 'decor', cost: 6000000, requires: ['drop_b2'],
-    pad: { x: -2.55, z: 5.35 }, mult: 1.15 },
+    pad: { x: -2.1, z: 3.35 }, mult: 1.15 },
   { id: 'up_hat', name: 'Tiny Top-Hat Station', desc: 'Every item gets a tiny top hat. Classy: worth x2.5.', kind: 'upgrader', cost: 10000000, requires: ['up_wrap'], line: 'B',
     pad: { x: 2.75, z: 7.0 }, at: { x: 2.75, z: 8.0 }, upgrader: { mult: 2.5, fx: 'hat' } },
   { id: 'mega', name: 'MEGA Dropper', desc: 'Drops entire crates of premium scrap.', kind: 'dropper', cost: 18000000, requires: ['up_hat'], line: 'B',
@@ -88,8 +88,8 @@ export const PADS: PadDef[] = [
 
 export const padById = (id: string): PadDef | undefined => PADS.find((p) => p.id === id);
 
-/** Rebirth unlocks once these are built. */
-export const REBIRTH_REQUIRES = ['mega', 'speed_2', 'deco_neon'];
+/** Rebirth unlocks once the whole factory is built. */
+export const REBIRTH_REQUIRES = PADS.map((p) => p.id);
 /** Cash price of the n-th rebirth (0-based). */
 export const rebirthCost = (stars: number): number => 30_000_000 * Math.pow(3, stars);
 /** Permanent factory income bonus per Factory Star. */

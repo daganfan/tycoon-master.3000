@@ -4,7 +4,7 @@ import type { Game } from '@/sim/game';
 import type { PropPose } from '@/sim/types';
 import type { Physics, PhysObj } from './physics';
 import type { Avatar } from './avatar';
-import { ROOM } from './room';
+import { insideAny } from './garage/areas';
 
 /** What the interaction system needs from the world (kept small to avoid tight coupling). */
 export interface InteractHost {
@@ -470,7 +470,7 @@ function quatAngle(a: THREE.Quaternion, b: THREE.Quaternion): number {
   return a.angleTo(b);
 }
 
-/** Inside the bedroom (with a margin), above the floor and below the ceiling. */
+/** Inside the bedroom or the garage (with a margin), above the floor and below the ceiling. */
 export function inside(p: THREE.Vector3Like, margin = 0.35): boolean {
-  return Math.abs(p.x) < ROOM.hx + margin && Math.abs(p.z) < ROOM.hz + margin && p.y > -0.5 && p.y < ROOM.h + 1.5;
+  return insideAny(p, margin);
 }
