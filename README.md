@@ -8,6 +8,9 @@ You start out broke, with nothing but a crusty old PC. You play tycoon games to 
 
 ## Play / Share / Install
 
+### 🪟 Windows: just download and double-click
+Open the [**Play On Windows**](Play%20On%20Windows/) folder, download **both** `TycoonMaster3000.exe` and `resources.neu` into the same folder, and double-click the `.exe`. Nothing to install (Windows 10/11). If SmartScreen warns, click *More info → Run anyway*. Rebuild it with `bash scripts/build-windows.sh`.
+
 - **Play in the browser:** https://daganfan.github.io/tycoon-master.3000/ (once GitHub Pages is switched on, see below). Works in Chrome, Edge, Firefox and Safari, on desktop and mobile, and keeps working offline after the first visit.
 - **Install it as an app:** use the **Install** icon in the address bar (Chrome/Edge), **Add to Home Screen** (iPhone/iPad/Android) or **File → Add to Dock** (Safari on Mac).
 - **Desktop downloads:** Windows installer/portable `.exe`, Mac `.dmg` and Linux AppImage are built by the **Desktop builds** workflow in the Actions tab.

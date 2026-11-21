@@ -1,0 +1,41 @@
+{
+  "$schema": "https://raw.githubusercontent.com/neutralinojs/neutralinojs/main/schemas/neutralino.config.schema.json",
+  "applicationId": "com.tycoonmaster3000.game",
+  "version": "0.2.0",
+  "defaultMode": "window",
+  "port": 47321,
+  "documentRoot": "/www/",
+  "url": "/",
+  "enableServer": true,
+  "enableNativeAPI": false,
+  "tokenSecurity": "one-time",
+  "logging": { "enabled": false, "writeToLogFile": false },
+  "nativeAllowList": [],
+  "globalVariables": {},
+  "modes": {
+    "window": {
+      "title": "Tycoon Master 3000",
+      "width": 1280,
+      "height": 800,
+      "minWidth": 960,
+      "minHeight": 600,
+      "center": true,
+      "resizable": true,
+      "maximize": true,
+      "fullScreen": false,
+      "alwaysOnTop": false,
+      "icon": "/www/pwa-512.png",
+      "enableInspector": false,
+      "borderless": false,
+      "exitProcessOnClose": true
+    }
+  },
+  "cli": {
+    "binaryName": "TycoonMaster3000",
+    "resourcesPath": "/www/",
+    "extensionsPath": "/extensions/",
+    "clientLibrary": "/www/neutralino.js",
+    "binaryVersion": "6.10.0",
+    "clientVersion": "6.4.0"
+  }
+}
