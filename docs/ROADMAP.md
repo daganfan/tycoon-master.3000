@@ -34,11 +34,12 @@
 - [ ] Physics comfort settings
 
 ## Milestone 4: Expansion
-- [ ] Phase 2: Garage + automation (bots)
+- [x] Phase 2: Garage — walk-in physical factory tycoon + Hot Dog Highway, Robo Car Wash
 - [ ] Phase 3: LAN Café / Arcade + customers
-- [ ] Pixel Tokens + per-mini-tycoon prestige
+- [ ] Pixel Tokens + per-mini-tycoon prestige (factory rebirth already awards Pixel Tokens)
 - [ ] "Rage Quit" prestige + Legacy Points
-- [ ] Skill tree to ~80 nodes
+- [x] Skill tree to 70 nodes (Hardware branch, Legacy placeholders)
+- [x] Multiplayer: P2P visits, co-op screens, chat
 
 ## Milestone 5: Studio & Beyond
 - [ ] Phase 4: Indie Studio (build your own mini-tycoons)
