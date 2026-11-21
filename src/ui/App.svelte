@@ -107,7 +107,7 @@
       <button onclick={() => ui.unfocus?.()}>🚶 Step back <kbd>Esc</kbd></button>
     {:else}
       <button onclick={() => ui.focusMain?.()} data-testid="use-pc">🖥️ Use PC <kbd>E</kbd></button>
-      <button onclick={() => ui.tidy?.()} data-testid="tidy" disabled={hud.tidying} title="Put all furniture and props back where you last placed them">{hud.tidying ? '🧹 Tidying…' : '🧹 Tidy up'}</button>
+      <button onclick={() => ui.tidy?.()} data-testid="tidy" disabled={hud.tidying} title="Put all furniture and props back where you last placed them">{hud.tidying ? '🧹 Tidying…' : '🧹 Tidy up'} <kbd>X</kbd></button>
     {/if}
     <button onclick={() => (mpOpen = !mpOpen)} data-testid="mp-button" title="Play with friends">👥 Multiplayer</button>
   </div>

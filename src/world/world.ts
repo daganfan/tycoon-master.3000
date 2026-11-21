@@ -21,7 +21,7 @@ import type { NetHooks } from './remote';
 import { Garage } from './garage/garage';
 import { CameraRig, facingForYaw, lookDir, nextMode, type CamMode } from './camera';
 import { Controls, GRAB_REACH, aimAt, type AimHit } from './controls';
-import { areaAt } from './garage/areas';
+import { areaAt, insideAny } from './garage/areas';
 import { MotionProbe } from './perf';
 import { ScreenScheduler } from './screens';
 import { setPerfProvider } from './perfOverlay';
@@ -38,6 +38,10 @@ interface ScreenEntry {
 }
 
 const FOV = 60;
+/** Things that escape from mini-games (jammed ducks…): capped, short-lived, swept by Tidy Up. */
+const TOYS = new Set(['duck', 'sock', 'remote']);
+const MAX_TOYS = 10;
+const TOY_LIFETIME = 90;
 
 /** The 3D bedroom: rendering, physics, camera, input and screens. */
 export class World {
@@ -143,8 +147,68 @@ export class World {
   }
 
   /** Put every piece of furniture and decor back where it belongs. */
+  /** Tidy Up: sweep away escaped toys (ducks, socks…), then fly furniture home. */
   tidyAll(): number {
+    if (this.interact.tidyState() !== 'idle') return -1;
+    for (const t of this.props.filter((p) => TOYS.has(p.kind))) this.removeToy(t);
     return this.interact.tidyAll();
+  }
+
+  private removeToy(t: PhysObj): void {
+    const i = this.props.indexOf(t);
+    if (i >= 0) this.props.splice(i, 1);
+    this.phys.remove(t);
+  }
+
+  /** Escaped toys fade out of existence after a while so they never pile up. */
+  private expireToys(): void {
+    for (const t of this.props) {
+      if (!TOYS.has(t.kind)) continue;
+      const born = (t.mesh.userData.born as number | undefined) ?? (t.mesh.userData.born = this.time);
+      if (this.time - born > TOY_LIFETIME && !this.interact.held) {
+        this.removeToy(t);
+        return; // one per frame keeps it cheap
+      }
+    }
+  }
+
+  /** Tidy hook: the player is standing where furniture lands, so they step aside. */
+  clearLanding(boxes: THREE.Box3[]): void {
+    const a = this.avatar.body.translation();
+    const ab = new THREE.Box3(new THREE.Vector3(a.x - 0.25, a.y - 0.75, a.z - 0.25), new THREE.Vector3(a.x + 0.25, a.y + 0.75, a.z + 0.25));
+    const hit = boxes.find((x) => x.intersectsBox(ab));
+    if (!hit) return;
+    // Step out to the nearest spot around the furniture where the player's capsule
+    // touches nothing (not into the chair, a wall or another prop).
+    const R = this.phys.R;
+    const shape = new R.Capsule(0.45, 0.27);
+    const rot = { x: 0, y: 0, z: 0, w: 1 };
+    const free = (x: number, z: number): boolean => {
+      let blocked = false;
+      // Only walls/static stuff and heavy furniture block a spot; coins, ducks and
+      // small props just get nudged by the player and must not make every spot "taken".
+      this.phys.world.intersectionsWithShape({ x, y: a.y + 0.12, z }, rot, shape, () => ((blocked = true), false), undefined, undefined, undefined, this.avatar.body,
+        (col) => { const b = col.parent(); return !b || !b.isDynamic() || b.mass() > 12; });
+      return !blocked;
+    };
+    const c = hit.getCenter(new THREE.Vector3());
+    const candidates: { x: number; z: number }[] = [];
+    for (const pad of [0.35, 0.7, 1.1, 1.6]) {
+      candidates.push(
+        { x: a.x, z: hit.max.z + pad }, { x: a.x, z: hit.min.z - pad },
+        { x: hit.max.x + pad, z: a.z }, { x: hit.min.x - pad, z: a.z },
+        { x: c.x, z: hit.max.z + pad }, { x: hit.max.x + pad, z: hit.max.z + pad }, { x: hit.min.x - pad, z: hit.max.z + pad },
+      );
+    }
+    candidates.sort((p, q) => Math.hypot(p.x - a.x, p.z - a.z) - Math.hypot(q.x - a.x, q.z - a.z));
+    const spot = candidates.find(
+      (p) => insideAny({ x: p.x, y: 1, z: p.z }, -0.35) && !boxes.some((b) => b.containsPoint(new THREE.Vector3(p.x, b.min.y + 0.1, p.z))) && free(p.x, p.z),
+    );
+    // Never leave the player inside landing furniture: fall back to the nearest spot in the room.
+    const target = spot ?? candidates.find((p) => insideAny({ x: p.x, y: 1, z: p.z }, -0.35) && !boxes.some((b) => b.containsPoint(new THREE.Vector3(p.x, b.min.y + 0.1, p.z))));
+    if (!target) return;
+    this.avatar.body.setTranslation({ x: target.x, y: a.y, z: target.z }, true);
+    this.avatar.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
   }
 
   static async create(canvas: HTMLCanvasElement, game: Game, host: OsHost): Promise<World> {
@@ -292,7 +356,8 @@ export class World {
       const toy = spawnToy(e.kind, center.add(normal.clone().multiplyScalar(0.12)), normal, this.scene, this.phys);
       this.props.push(toy);
       this.gfx.adopt(toy.mesh);
-      if (this.props.filter((p) => p.kind === e.kind).length > 25) {
+      toy.mesh.userData.born = this.time;
+      if (this.props.filter((p) => p.kind === e.kind).length > MAX_TOYS) {
         const old = this.props.find((p) => p.kind === e.kind)!;
         this.props.splice(this.props.indexOf(old), 1);
         this.phys.remove(old);
@@ -430,6 +495,7 @@ export class World {
     if (code === 'Escape' && this.focus) this.setFocus(null, false);
     if (this.focus) return;
     if (code === 'KeyH') this.interact.setHomeHere();
+    if (code === 'KeyX') this.tidyAll();
     if (code === 'KeyV') this.toggleCamMode();
     if (code === 'KeyF') this.chaos.tryFlop();
     if (code === 'KeyG') this.interact.toggleGrab();
@@ -556,6 +622,7 @@ export class World {
     this.chaos.update(dt, this.phys.objs, fast);
     this.jelly(dt, comfort);
     this.fx?.update(dt, this.time);
+    this.expireToys();
     for (const s of this.spinners) s.rotation.y += dt * 25;
 
     // Screens
@@ -579,7 +646,7 @@ export class World {
         ? near.os.screen === 'off'
           ? 'E — power on the crusty PC'
           : 'E — use this screen'
-        : 'WASD move · Mouse look · V camera · Shift sprint · Space jump · F flop · G grab · T skills';
+        : 'WASD move · Mouse look · V camera · Shift sprint · Space jump · F flop · G grab · X tidy · T skills';
 
     this.gfx.setQuality((this.game.state.settings.quality ?? 'auto') as Quality);
     this.gfx.setFocus(this.rig.focusBlend);

@@ -213,11 +213,23 @@ export class Physics {
     }
   }
 
+  /**
+   * "Calm" window (seconds of sim time): after every step, cap the speed of every
+   * dynamic body except `calmExempt`. Used right after Tidy Up so any leftover
+   * overlap is resolved as a gentle nudge instead of launching furniture.
+   */
+  calmFor = 0;
+  calmExempt: RAPIER.RigidBody | null = null;
+
   update(dt: number, maxSteps = 4): number {
     this.acc += dt;
     let steps = 0;
     while (this.acc >= this.step && steps < maxSteps) {
       this.world.step();
+      if (this.calmFor > 0) {
+        this.calmFor -= this.step;
+        this.calm();
+      }
       this.acc -= this.step;
       steps++;
     }
@@ -227,11 +239,35 @@ export class Physics {
     return steps;
   }
 
+  private calm(): void {
+    const MAX_V = 0.6;
+    const MAX_W = 2;
+    this.world.forEachRigidBody((b) => {
+      if (!b.isDynamic() || b === this.calmExempt || b.isSleeping()) return;
+      const v = b.linvel();
+      const s = Math.hypot(v.x, v.y, v.z);
+      // Let things fall normally (gravity), only clamp sideways/upward bursts.
+      if (s > MAX_V && !(v.y < 0 && Math.hypot(v.x, v.z) < MAX_V)) {
+        const k = MAX_V / s;
+        b.setLinvel({ x: v.x * k, y: Math.min(v.y * k, v.y), z: v.z * k }, true);
+      }
+      const w = b.angvel();
+      const ws = Math.hypot(w.x, w.y, w.z);
+      if (ws > MAX_W) b.setAngvel({ x: (w.x * MAX_W) / ws, y: (w.y * MAX_W) / ws, z: (w.z * MAX_W) / ws }, true);
+    });
+  }
+
   /** Put bodies that have barely moved for a while to sleep, so stacks stop creeping. */
   private nap(dt: number): void {
     for (const o of this.objs) {
       const b = o.body;
-      if (o.kind === 'avatar' || !b.isDynamic() || b.isSleeping()) continue;
+      if (o.kind === 'avatar' || !b.isDynamic() || b.isSleeping()) {
+        // Reset while frozen/asleep: a body that was still before being carried or
+        // tidied must not be put to sleep the very step it turns dynamic again —
+        // Rapier then misses its floor contact and it sinks through the floor.
+        this.still.set(b, 0);
+        continue;
+      }
       const lv = b.linvel();
       const av = b.angvel();
       if (Math.abs(lv.x) + Math.abs(lv.y) + Math.abs(lv.z) > NAP_LIN || Math.abs(av.x) + Math.abs(av.y) + Math.abs(av.z) > NAP_ANG) {

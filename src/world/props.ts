@@ -269,6 +269,7 @@ export function spawnToy(kind: string, from: THREE.Vector3, dir: THREE.Vector3, 
   scene.add(shadowed(g));
   const body = phys.createBody({ pos: from, ccd: true, angularDamping: 0.3 });
   phys.addCollider(body, collider, { density: 200, restitution: kind === 'duck' ? 0.7 : 0.2 });
-  body.setLinvel({ x: dir.x * 3 + (Math.random() - 0.5), y: 2 + Math.random(), z: dir.z * 3 + (Math.random() - 0.5) }, true);
+  // Pop out gently: enough to be funny, not enough to bulldoze the desk.
+  body.setLinvel({ x: dir.x * 1.2 + (Math.random() - 0.5) * 0.4, y: 0.8 + Math.random() * 0.4, z: dir.z * 1.2 + (Math.random() - 0.5) * 0.4 }, true);
   return phys.track(g, body, kind, 'props', { restitution: kind === 'duck' ? 0.7 : 0.2, friction: 0.6, density: 200 });
 }

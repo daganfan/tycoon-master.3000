@@ -10,6 +10,11 @@ import { comfortTuning } from './physics';
 import { deliberatePlacement, settleVerdict, tidyOrder, TIDY_COOLDOWN, type TidyItem } from './tidy';
 
 /** What the interaction system needs from the world (kept small to avoid tight coupling). */
+/** Seconds landed furniture stays frozen while the physics re-finds its contacts. */
+const LAND_DELAY = 0.12;
+/** Seconds landed objects may not fall asleep (Rapier drops a sleeping body's floor contact). */
+const KEEP_AWAKE = 1.5;
+
 export interface InteractHost {
   readonly game: Game;
   readonly phys: Physics;
@@ -24,6 +29,8 @@ export interface InteractHost {
   aimProp?(): { obj: PhysObj; point: THREE.Vector3 } | null;
   /** Where a carried object should float at `dist` (e.g. in front of the eyes in first person); null = in front of the avatar. */
   holdPoint?(dist: number): THREE.Vector3 | null;
+  /** Tidy is about to land furniture in `boxes`: move coins and the player out of the way. */
+  clearLanding?(boxes: THREE.Box3[]): void;
 }
 
 interface Tween {
@@ -80,6 +87,10 @@ export class Interact {
   private saveAcc = 0;
   private pendingHome = new Map<PhysObj, PendingHome>();
   private tidyBatch: { objs: PhysObj[]; left: number; start: number } | null = null;
+  /** Objects that landed and are waiting (kinematic) for their contacts to be found. */
+  private landing: { objs: PhysObj[]; at: number } | null = null;
+  /** Just-landed objects are kept awake for a moment so they can't sleep through their floor contact. */
+  private keepAwake: { objs: PhysObj[]; until: number } | null = null;
   private tidyReadyAt = 0;
   private savedGroups = new Map<number, number>();
   /** Called when the player deliberately sets something down at a new home (for achievements). */
@@ -204,7 +215,7 @@ export class Interact {
 
   /** 'tidying' while things fly home, 'cooldown' right after, else 'idle'. */
   tidyState(): 'idle' | 'tidying' | 'cooldown' {
-    return this.tidyBatch ? 'tidying' : this.now < this.tidyReadyAt ? 'cooldown' : 'idle';
+    return this.tidyBatch || this.landing ? 'tidying' : this.now < this.tidyReadyAt ? 'cooldown' : 'idle';
   }
 
   /** Every batch member has arrived: land them all at once, supports first. */
@@ -212,7 +223,6 @@ export class Interact {
     const batch = this.tidyBatch;
     if (!batch) return;
     this.tidyBatch = null;
-    const R = this.w.phys.R;
     const live = batch.objs.filter((o) => this.w.phys.objs.includes(o));
     for (const o of live) {
       const b = o.body;
@@ -222,26 +232,81 @@ export class Interact {
         c.setCollisionGroups(this.savedGroups.get(c.handle) ?? 0xffffffff);
         this.savedGroups.delete(c.handle);
       }
+      // Stay kinematic (immune to gravity) at the home pose for a moment: the
+      // broad phase needs a step or two to find the floor/desk contacts again
+      // after the collision groups come back. Turning dynamic immediately made
+      // furniture sink ~25 cm into the floor and then get launched back out.
+      b.setTranslation(o.home.pos, true);
+      b.setRotation(o.home.quat, true);
+      b.setNextKinematicTranslation(o.home.pos);
+      b.setNextKinematicRotation(o.home.quat);
+      o.wasUpright = up(o).y > 0.9;
+      o.handledUntil = this.now + 1.5;
+      this.w.phys.sync(o);
+    }
+    this.landing = { objs: live, at: this.now + LAND_DELAY };
+    // Anything that GEOMETRICALLY overlaps a landed collider (a coin under the desk,
+    // decor that wasn't part of the batch, the player) is moved out BEFORE the next
+    // physics step; otherwise the solver shoves the overlap apart and the desk jumps.
+    // Exact shape queries, not bounding boxes: the chair tucked under the desk or a
+    // lamp resting on it are not overlapping and must stay exactly where they are.
+    const world = this.w.phys.world;
+    world.propagateModifiedBodyPositionsToColliders();
+    const boxes = live.map((o) => new THREE.Box3().setFromObject(o.mesh));
+    const batchBodies = new Set(live.map((o) => o.body.handle));
+    const avatarBody = this.w.avatar.body;
+    const lifted = new Set<number>();
+    let avatarHit = false;
+    live.forEach((o, idx) => {
+      for (let i = 0; i < o.body.numColliders(); i++) {
+        const c = o.body.collider(i);
+        world.intersectionsWithShape(c.translation(), c.rotation(), c.shape, (other) => {
+          const ob = other.parent();
+          if (!ob || !ob.isDynamic() || batchBodies.has(ob.handle) || lifted.has(ob.handle)) return true;
+          if (ob.handle === avatarBody.handle) {
+            avatarHit = true;
+            return true;
+          }
+          lifted.add(ob.handle);
+          // Pop it onto the top of whatever landed on it, calmly.
+          const p = ob.translation();
+          ob.setTranslation({ x: p.x, y: boxes[idx]!.max.y + 0.12, z: p.z }, true);
+          ob.setLinvel({ x: 0, y: 0, z: 0 }, true);
+          ob.setAngvel({ x: 0, y: 0, z: 0 }, true);
+          const po = this.w.phys.objs.find((x) => x.body === ob);
+          if (po) this.w.phys.sync(po);
+          return true;
+        }, undefined, undefined, c, o.body);
+      }
+    });
+    // The player gets a generous margin (not just exact overlap): standing pressed
+    // against a landing desk is enough to shove it once physics takes over.
+    void avatarHit;
+    this.w.clearLanding?.(boxes.map((b) => b.clone().expandByScalar(0.3)));    this.tidyReadyAt = this.now + TIDY_COOLDOWN;
+  }
+
+  /** Contacts are known again: hand the landed objects back to the physics, asleep and still. */
+  private completeLanding(): void {
+    const l = this.landing;
+    if (!l) return;
+    this.landing = null;
+    const R = this.w.phys.R;
+    for (const o of l.objs) {
+      if (!this.w.phys.objs.includes(o)) continue;
+      const b = o.body;
       b.setBodyType(R.RigidBodyType.Dynamic, true);
       b.setTranslation(o.home.pos, true);
       b.setRotation(o.home.quat, true);
       b.setLinvel({ x: 0, y: 0, z: 0 }, true);
       b.setAngvel({ x: 0, y: 0, z: 0 }, true);
-      o.wasUpright = up(o).y > 0.9;
-      o.handledUntil = this.now + 1.5;
       this.w.phys.sync(o);
     }
-    // Loose toys sitting where furniture just landed get lifted on top instead of being blasted away.
-    const boxes = live.map((o) => new THREE.Box3().setFromObject(o.mesh));
-    for (const t of this.w.phys.objs) {
-      if (t.id || t.kind === 'avatar' || !t.body.isDynamic()) continue;
-      const p = v3(t.body.translation());
-      const hit = boxes.find((bx) => bx.containsPoint(p));
-      if (hit) t.body.setTranslation({ x: p.x, y: hit.max.y + 0.15, z: p.z }, true);
-    }
-    // Landed exactly on their resting poses: sleep, so nothing creeps or jumps afterwards.
-    for (const o of live) o.body.sleep();
-    this.tidyReadyAt = this.now + TIDY_COOLDOWN;
+    this.keepAwake = { objs: l.objs, until: this.now + KEEP_AWAKE };
+    // Do NOT force sleep() here: a body put to sleep in the same step it turns
+    // dynamic loses its floor contact and sinks through the floor (then the
+    // out-of-bounds rescue snaps it back — that was the "desk jumps" bug).
+    // They are still and exactly on their resting poses; the engine puts them
+    // to sleep by itself a moment later.
   }
 
   /* ------------------------------------------------------------ queries */
@@ -551,6 +616,11 @@ export class Interact {
     this.now += dt;
     this.updateHeld(dt);
     this.updateTweens(dt);
+    if (this.landing && this.now >= this.landing.at) this.completeLanding();
+    if (this.keepAwake) {
+      if (this.now > this.keepAwake.until) this.keepAwake = null;
+      else for (const o of this.keepAwake.objs) if (o.body.isSleeping()) o.body.wakeUp();
+    }
     // Safety net: a batch that somehow lost a member still lands.
     if (this.tidyBatch && this.now - this.tidyBatch.start > 5) {
       this.tweens = this.tweens.filter((t) => !t.batch);

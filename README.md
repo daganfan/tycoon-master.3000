@@ -77,6 +77,7 @@ Add `?fresh` to the URL to start a new game without touching your save.
 | R | Stand a toppled thing back up |
 | Esc | Step back from a screen (click the room to capture the mouse again) |
 | Right-drag (or touch-drag) | Look around when the mouse can't be captured |
+| X | Tidy up (put everything back, sweep away escaped ducks) |
 | T | Skill tree |
 | F | Flop over (mayhem!) |
 | Enter | Chat (multiplayer) |

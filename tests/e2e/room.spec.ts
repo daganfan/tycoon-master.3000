@@ -117,3 +117,46 @@ test('room: a fast object breaks the window, the Window Guy fixes it, trophies u
   expect(await tm(page, () => (window as unknown as { __tm: TM }).__tm.world.glass.broken)).toBe(false);
   expect(await tm(page, () => (window as unknown as { __tm: TM }).__tm.game.canBuyItem('window_guy'))).toBe(false);
 });
+
+// Regression: Tidy Up used to launch the desk (it slept through its floor contact
+// on landing, sank, and was snapped back), and escaped ducks/coins/the player made it worse.
+test('room: tidy after a knocked-over desk with ducks, coins and the player in the way is calm', async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.goto('/?fresh&gfx=low');
+  await page.waitForFunction(() => !!(window as unknown as { __tm?: unknown }).__tm, null, { timeout: 60_000 });
+  const r = await page.evaluate(() => {
+    type V3 = { x: number; y: number; z: number };
+    type Body = { translation(): V3; linvel(): V3; setTranslation(v: V3, w: boolean): void; setRotation(q: V3 & { w: number }, w: boolean): void };
+    type Obj = { id?: string; kind: string; body: Body; home: { pos: V3 } };
+    const tm = (window as unknown as { __tm: { game: { setFlag(f: string): void; buyItem(id: string): boolean; tick(dt: number): void; state: { cash: { add(n: number): unknown }; floorCash: { add(n: number): unknown } }; bus: { emit(t: string, p: unknown): void } }; world: { gfx: { render: () => void }; update(dt: number): void; tidyAll(): number; interact: { tidyState(): string }; room: { desk: Obj }; phys: { objs: Obj[] }; props: Obj[]; avatar: { body: Body; position: { constructor: new (x: number, y: number, z: number) => V3 } }; cash: { payout(a: unknown, o: V3, d: V3): void } } } }).__tm;
+    const { game: g, world: w } = tm;
+    (g.state as { cash: unknown }).cash = g.state.cash.add(1e6);
+    g.setFlag('booted');
+    for (const id of ['used_monitor', 'mech_keyboard', 'lava_lamp', 'jm_rubber_chicken']) g.buyItem(id);
+    w.gfx.render = () => {};
+    const step = (n: number) => { for (let i = 0; i < n; i++) { w.update(1 / 60); if (i % 6 === 0) g.tick(0.1); } };
+    step(240);
+    const d = w.room.desk; const h = d.home.pos; const V = w.avatar.position.constructor;
+    d.body.setTranslation({ x: h.x + 1.2, y: 0.6, z: h.z + 1.0 }, true);
+    d.body.setRotation({ x: 0.5, y: 0, z: 0.5, w: 0.7 }, true);
+    for (let i = 0; i < 8; i++) g.bus.emit('spawn', { kind: 'duck', tycoonId: 'lemon_mogul' });
+    (g.state as { floorCash: unknown }).floorCash = g.state.floorCash.add(500);
+    w.cash.payout(g.state.floorCash, new V(h.x, 0.5, h.z), new V(0, 0, 1));
+    w.avatar.body.setTranslation({ x: h.x, y: 1, z: h.z }, true);
+    step(180);
+    w.tidyAll();
+    let guard = 0;
+    while (w.interact.tidyState() === 'tidying' && guard++ < 1200) step(1);
+    let deskOff = 0;
+    for (let i = 0; i < 180; i++) {
+      step(1);
+      const t = d.body.translation();
+      deskOff = Math.max(deskOff, Math.hypot(t.x - h.x, t.y - h.y, t.z - h.z));
+    }
+    const displaced = w.phys.objs.filter((o) => o.id && o.kind !== 'chair').filter((o) => { const t = o.body.translation(); return Math.hypot(t.x - o.home.pos.x, t.y - o.home.pos.y, t.z - o.home.pos.z) > 0.05; }).map((o) => o.id);
+    return { deskOff, displaced, ducks: w.props.filter((o) => o.kind === 'duck').length };
+  });
+  expect(r.deskOff).toBeLessThan(0.02);
+  expect(r.displaced).toEqual([]);
+  expect(r.ducks).toBe(0);
+});

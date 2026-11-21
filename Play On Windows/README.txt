@@ -26,4 +26,4 @@ Click the game to capture the mouse (Esc frees it)
 Mouse look · WASD move · Shift sprint · Space jump · V 1st/3rd person
 E use a screen / light switch / door / drawer · Esc step back from a screen
 G or hold left mouse: grab and carry · scroll: push/pull · right click: drop
-R stand things up · H set this spot as home · F flop · T skill tree · F3 FPS
+X tidy up the room · R stand things up · H set this spot as home · F flop · T skill tree · F3 FPS
