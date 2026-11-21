@@ -1,6 +1,7 @@
 import type { Game } from '@/sim/game';
 import { formatCash } from '@/core/num';
 import { cosmeticById } from '@/content/cosmetics';
+import { screenName } from '@/sim/desk';
 import { Ui, inset, type Rect } from './ui';
 import { themeFor } from './theme';
 import { builtinApps, tycoonApp } from './apps/apps';
@@ -30,17 +31,55 @@ const WALLPAPERS: [string, string][] = [
   ['#232526', '#414345'],
 ];
 
+/** Smallest logical height the OS lays out for; very wide screens get a wider logical canvas instead. */
+export const MIN_LOGICAL_H = 576;
+export const TASKBAR_H = 48;
+const TITLE_H = 34;
+
+/** Logical (layout) size for a physical canvas: 1280 wide on the main PC, 1024 on smaller screens. */
+export function logicalSize(width: number, height: number, label: string): { w: number; h: number } {
+  let w = label === 'main' ? 1280 : 1024;
+  let h = Math.round((w * height) / width);
+  if (h < MIN_LOGICAL_H) {
+    h = MIN_LOGICAL_H;
+    w = Math.round((h * width) / height);
+  }
+  return { w, h };
+}
+
+interface CapacityDialog {
+  app: string;
+  pauses: string[];
+  /** Another screen with a free window, if any. */
+  elsewhere: string | null;
+}
+
+/**
+ * TycoonOS: a fake desktop OS drawn into a canvas. Layout happens in a fixed
+ * LOGICAL resolution (`vw` × `vh`, see logicalSize) and is scaled to the
+ * physical canvas, so every screen in the room gets the same usable layout.
+ *
+ * Windows live in the game state (Game.windowsOn) when the OS has a
+ * `screenId`, because what is open on which screen decides which games run.
+ */
 export class TycoonOS {
   readonly canvas: HTMLCanvasElement;
   readonly ui: Ui;
+  /** Logical layout size. */
+  readonly vw: number;
+  readonly vh: number;
+  /** Physical pixels per logical pixel. */
+  readonly scale: number;
   screen: Screen = 'off';
-  windows: string[] = [];
+  private localWindows: string[] = [];
   private bootT = 0;
   private time = 0;
   private dt = 0;
   private toasts: { text: string; tone: string; t: number }[] = [];
   private rates = new Map<string, { last: number; rate: number }>();
   private rateT = 0;
+  private startOpen = false;
+  private dialog: CapacityDialog | null = null;
   /** Set when anything visible changed; the world uploads the texture only then. */
   dirty = true;
 
@@ -50,12 +89,18 @@ export class TycoonOS {
     readonly width = 1280,
     readonly height = 800,
     readonly label = 'main',
+    /** Which screen of the game's desk this OS shows (null = private windows, nothing runs from here). */
+    readonly screenId: string | null = label === 'main' ? 'main' : null,
   ) {
     this.canvas = document.createElement('canvas');
     this.canvas.width = width;
     this.canvas.height = height;
     const g = this.canvas.getContext('2d');
     if (!g) throw new Error('2D canvas unavailable');
+    const size = logicalSize(width, height, label);
+    this.vw = size.w;
+    this.vh = size.h;
+    this.scale = width / size.w;
     this.ui = new Ui(g, themeFor(0));
     game.bus.on('notify', (n) => this.toast(n.text, n.tone));
     game.bus.on('token', (n) => this.toast(`+${n.amount} ${n.token} token · ${n.reason}`, 'token'));
@@ -66,8 +111,24 @@ export class TycoonOS {
     return Math.floor(this.game.stat('os.tier'));
   }
 
+  /** Open windows on this screen, oldest first. */
+  get windows(): string[] {
+    return this.screenId ? this.game.windowsOn(this.screenId) : this.localWindows;
+  }
+
+  set windows(w: string[]) {
+    if (this.screenId) this.game.state.desk.screens[this.screenId] = [...w];
+    else this.localWindows = [...w];
+    this.dirty = true;
+  }
+
   maxWindows(): number {
-    return this.tier + 1;
+    return this.game.windowsPerScreen();
+  }
+
+  /** Friendly name of this screen ("Main PC", "Monitor 2", …). */
+  get name(): string {
+    return this.screenId ? screenName(this.screenId) : 'Screen';
   }
 
   apps(): OsApp[] {
@@ -83,26 +144,64 @@ export class TycoonOS {
     this.dirty = true;
   }
 
+  /** Open an app in a window here (pushes the oldest window out when full). */
   open(id: string): void {
     if (this.screen !== 'desktop') return;
-    this.windows = this.windows.filter((w) => w !== id);
-    this.windows.push(id);
-    while (this.windows.length > this.maxWindows()) this.windows.shift();
+    if (this.screenId) this.game.openApp(this.screenId, id);
+    else {
+      this.localWindows = this.localWindows.filter((w) => w !== id);
+      this.localWindows.push(id);
+      while (this.localWindows.length > this.maxWindows()) this.localWindows.shift();
+    }
     this.dirty = true;
   }
 
+  /**
+   * What the player clicked to open something. Games that would pause another
+   * game ask first (capacity dialog); other apps just open and say what paused.
+   */
+  launch(id: string): void {
+    if (this.screen !== 'desktop') return;
+    this.startOpen = false;
+    if (!this.screenId) return this.open(id);
+    const plan = this.game.planOpen(this.screenId, id);
+    if (plan.pauses.length && this.game.isTycoon(id)) {
+      const free = this.game.freeScreen();
+      this.dialog = { app: id, pauses: plan.pauses, elsewhere: free && free !== this.screenId ? free : null };
+      this.dirty = true;
+      return;
+    }
+    this.open(id);
+    if (plan.pauses.length) {
+      const names = plan.pauses.map((p) => this.appTitle(p)).join(', ');
+      this.toast(`${names}: paused while ${this.appTitle(id)} is open. Close it to resume.`, 'warn');
+    }
+  }
+
   close(id: string): void {
-    this.windows = this.windows.filter((w) => w !== id);
+    if (this.screenId) this.game.closeApp(this.screenId, id);
+    else this.localWindows = this.localWindows.filter((w) => w !== id);
+    this.dirty = true;
+  }
+
+  minimize(id: string): void {
+    if (this.screenId) this.game.minimizeApp(this.screenId, id);
+    else this.localWindows = this.localWindows.filter((w) => w !== id);
     this.dirty = true;
   }
 
   /** The tycoon in the front-most window, if any (used for autoclick focus). */
   focusedTycoon(): string | null {
-    for (let i = this.windows.length - 1; i >= 0; i--) {
-      const id = this.windows[i]!;
+    const w = this.windows;
+    for (let i = w.length - 1; i >= 0; i--) {
+      const id = w[i]!;
       if (this.game.state.tycoons[id]) return id;
     }
     return null;
+  }
+
+  appTitle(id: string): string {
+    return this.apps().find((a) => a.id === id)?.title ?? id;
   }
 
   toast(text: string, tone = 'info'): void {
@@ -115,13 +214,13 @@ export class TycoonOS {
     return this.rates.get(id)?.rate ?? 0;
   }
 
-  /* ---- input (canvas pixel coordinates) ---- */
+  /* ---- input (physical canvas pixel coordinates) ---- */
   pointerMove(x: number, y: number): void {
-    this.ui.pointer(x, y);
+    this.ui.pointer(x / this.scale, y / this.scale);
     this.dirty = true;
   }
   click(x: number, y: number): void {
-    this.ui.pushClick(x, y);
+    this.ui.pushClick(x / this.scale, y / this.scale);
     this.dirty = true;
   }
   wheel(dy: number): void {
@@ -157,16 +256,20 @@ export class TycoonOS {
     const ui = this.ui;
     const g = ui.g;
     ui.begin(this.time);
+    g.setTransform(1, 0, 0, 1, 0, 0);
     g.clearRect(0, 0, this.width, this.height);
-    const full = { x: 0, y: 0, w: this.width, h: this.height };
+    g.setTransform(this.scale, 0, 0, this.scale, 0, 0);
+    const full = { x: 0, y: 0, w: this.vw, h: this.vh };
+    ui.pushBounds(full, 'screen');
     if (this.screen === 'off') {
       ui.rect(full, '#050607', 0);
-      ui.text('Press E (or click) to power on', this.width / 2, this.height / 2, { color: '#2a3a2a', size: 28, align: 'center' });
+      ui.text('Press E (or click) to power on', this.vw / 2, this.vh / 2, { size: 28, color: '#2a3a2a', align: 'center' });
       if (ui.clicked(full)) this.boot();
     } else if (this.screen === 'boot') this.drawBoot(full);
     else if (this.screen === 'lock') this.drawLock(full);
     else this.drawDesktop(full);
     this.drawToasts();
+    ui.popBounds();
     ui.end();
   }
 
@@ -174,11 +277,11 @@ export class TycoonOS {
     const ui = this.ui;
     this.bootT += this.dt;
     ui.rect(full, '#000', 0);
-    const cx = this.width / 2;
+    const cx = this.vw / 2;
     ui.text('🪙', cx, 300, { size: 120, align: 'center' });
     ui.text(ui.theme.name, cx, 440, { size: 54, bold: true, color: '#fff', align: 'center' });
     ui.text('Starting up... please do not kick the PC', cx, 500, { size: 22, color: '#999', align: 'center' });
-    ui.bar({ x: cx - 220, y: 560, w: 440, h: 18 }, this.bootT / 2.2, '#3d95ff', '#222');
+    ui.bar({ x: cx - 220, y: 540, w: 440, h: 18 }, this.bootT / 2.2, '#3d95ff', '#222');
     if (this.bootT > 2.2 || ui.clicked(full)) this.screen = 'lock';
     this.dirty = true;
   }
@@ -188,11 +291,11 @@ export class TycoonOS {
     this.drawWallpaper(full);
     ui.rect(full, 'rgba(0,0,0,0.35)', 0);
     const d = new Date();
-    ui.text(d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), this.width / 2, 300, { size: 110, bold: true, color: '#fff', align: 'center' });
-    ui.text('Broke Gamer', this.width / 2, 430, { size: 36, color: '#fff', align: 'center' });
-    if (ui.button({ x: this.width / 2 - 140, y: 480, w: 280, h: 60 }, 'Log in ▶', { primary: true, size: 24 })) {
+    ui.text(d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), this.vw / 2, 300, { size: 110, bold: true, color: '#fff', align: 'center' });
+    ui.text('Broke Gamer', this.vw / 2, 430, { size: 36, color: '#fff', align: 'center' });
+    if (ui.button({ x: this.vw / 2 - 140, y: 480, w: 280, h: 60 }, 'Log in ▶', { primary: true, size: 24 })) {
       this.screen = 'desktop';
-      if (this.label === 'main' && this.windows.length === 0) this.open('lemon_mogul');
+      if (this.screenId === 'main' && this.windows.length === 0 && !this.game.isRunning('lemon_mogul')) this.open('lemon_mogul');
     }
     this.dirty = true;
   }
@@ -201,68 +304,166 @@ export class TycoonOS {
     const wp = WALLPAPERS[this.game.state.settings.wallpaper % WALLPAPERS.length]!;
     const [a, b] = wp[0] ? wp : this.ui.theme.desktop;
     this.ui.gradient(r, a, b);
-    this.ui.text('TYCOON MASTER 3000', r.x + r.w - 24, r.y + r.h - 90, { size: 34, bold: true, color: 'rgba(255,255,255,0.18)', align: 'right' });
+    this.ui.text('TYCOON MASTER 3000', r.x + r.w - 24, r.y + r.h - 40, { size: 30, bold: true, color: 'rgba(255,255,255,0.18)', align: 'right' });
   }
 
   private drawDesktop(full: Rect): void {
     const ui = this.ui;
-    const taskH = 52;
-    const desk = { x: 0, y: 0, w: this.width, h: this.height - taskH };
+    const modal = this.startOpen || this.dialog !== null;
+    // While a menu or dialog is open, the desktop underneath ignores input.
+    const stash = modal ? ui.suspendInput() : null;
+    const desk = { x: 0, y: 0, w: this.vw, h: this.vh - TASKBAR_H };
     this.drawWallpaper(desk);
-    // Icons
     const apps = this.apps();
-    const iconW = 112;
-    const iconH = 104;
-    const perCol = Math.floor((desk.h - 16) / iconH);
-    apps.forEach((app, i) => {
-      const r = { x: 12 + Math.floor(i / perCol) * iconW, y: 12 + (i % perCol) * iconH, w: iconW - 8, h: iconH - 8 };
-      if (ui.inside(r)) ui.rect(r, 'rgba(255,255,255,0.18)', 6);
-      ui.emoji(app.icon, r.x + r.w / 2, r.y + 36, 44);
-      ui.text(app.title, r.x + r.w / 2, r.y + 80, { size: 14, color: '#fff', bold: true, align: 'center', maxWidth: r.w });
-      if (ui.clicked(r)) this.open(app.id);
-    });
-    // Windows (tiled)
-    const area = { x: 250, y: 12, w: this.width - 262, h: desk.h - 24 };
-    const n = this.windows.length;
-    const gap = 12;
-    const ww = n > 0 ? (area.w - gap * (n - 1)) / n : 0;
-    this.windows.forEach((id, i) => {
-      const app = apps.find((a) => a.id === id);
-      if (!app) return;
-      this.drawWindow(app, { x: area.x + i * (ww + gap), y: area.y, w: ww, h: area.h });
-    });
-    if (n === 0) {
-      ui.panel({ x: area.x + area.w / 2 - 260, y: area.y + area.h / 2 - 70, w: 520, h: 140 }, 'rgba(0,0,0,0.35)', false);
-      ui.text('Click an app to start earning.', area.x + area.w / 2, area.y + area.h / 2 - 20, { size: 24, color: '#fff', bold: true, align: 'center' });
-      const q = this.game.activeQuest();
-      if (q) ui.text(`📝 ${q.text}`, area.x + area.w / 2, area.y + area.h / 2 + 24, { size: 16, color: '#fff', align: 'center', maxWidth: 500 });
+    const wins = this.windows.map((id) => apps.find((a) => a.id === id)).filter((a): a is OsApp => !!a);
+    if (wins.length === 0) this.drawIcons(desk, apps);
+    else {
+      const area = inset(desk, 8);
+      const gap = 8;
+      const ww = (area.w - gap * (wins.length - 1)) / wins.length;
+      wins.forEach((app, i) => this.drawWindow(app, { x: area.x + i * (ww + gap), y: area.y, w: ww, h: area.h }));
     }
-    // Taskbar
-    const tb = { x: 0, y: this.height - taskH, w: this.width, h: taskH };
+    this.drawTaskbar(apps);
+    if (stash) ui.resumeInput(stash);
+    if (this.startOpen) this.drawStartMenu(full, apps);
+    if (this.dialog) this.drawDialog(full, this.dialog);
+  }
+
+  private drawIcons(desk: Rect, apps: OsApp[]): void {
+    const ui = this.ui;
+    const iconW = 104;
+    const iconH = 96;
+    const perCol = Math.max(1, Math.floor((desk.h - 16) / iconH));
+    const cols = Math.ceil(apps.length / perCol);
+    apps.forEach((app, i) => {
+      const r = { x: 10 + Math.floor(i / perCol) * iconW, y: 10 + (i % perCol) * iconH, w: iconW - 8, h: iconH - 8 };
+      if (ui.inside(r)) ui.rect(r, 'rgba(255,255,255,0.18)', 6);
+      ui.emoji(app.icon, r.x + r.w / 2, r.y + 32, 40);
+      const running = this.game.isRunning(app.id);
+      ui.text(`${running ? '▶ ' : ''}${app.title}`, r.x + r.w / 2, r.y + 74, { size: 13, color: '#fff', bold: true, align: 'center', maxWidth: r.w });
+      if (ui.clicked(r)) this.launch(app.id);
+    });
+    // Hint panel next to the icons.
+    const left = 10 + cols * iconW + 10;
+    const pw = Math.min(520, desk.w - left - 16);
+    if (pw < 200) return;
+    const p = { x: left + (desk.w - left - pw) / 2, y: desk.h / 2 - 80, w: pw, h: 160 };
+    ui.panel(p, 'rgba(0,0,0,0.4)', false);
+    ui.text('Open a game to start earning.', p.x + p.w / 2, p.y + 30, { size: 22, color: '#fff', bold: true, align: 'center', maxWidth: p.w - 20 });
+    ui.paragraph('Games only earn while their window is open (or minimized into a free background slot).', { x: p.x + 16, y: p.y + 52, w: p.w - 32, h: 40 }, 14, '#dde');
+    const q = this.game.activeQuest();
+    if (q) ui.paragraph(`📝 ${q.text}`, { x: p.x + 16, y: p.y + 100, w: p.w - 32, h: 50 }, 14, '#fff');
+  }
+
+  private drawTaskbar(apps: OsApp[]): void {
+    const ui = this.ui;
+    const tb = { x: 0, y: this.vh - TASKBAR_H, w: this.vw, h: TASKBAR_H };
+    const dark = !ui.theme.bevel;
+    const fg = dark ? '#fff' : '#111';
     ui.rect(tb, ui.theme.taskbar, 0);
     ui.bevel(tb);
-    if (ui.button({ x: 6, y: tb.y + 6, w: 110, h: taskH - 12 }, '🪙 Start', { primary: ui.theme.bevel ? false : true, size: 17 })) {
-      this.windows = [];
-    }
-    this.windows.forEach((id, i) => {
-      const app = apps.find((a) => a.id === id);
+    if (ui.button({ x: 6, y: tb.y + 6, w: 96, h: TASKBAR_H - 12 }, '🪙 Start', { primary: dark, size: 16 })) this.startOpen = !this.startOpen;
+    // Tray: running count, cash, clock.
+    const g = this.game;
+    const runningN = g.running().length;
+    const trayW = 260;
+    const tray = tb.x + tb.w - trayW;
+    ui.text(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), tb.w - 12, tb.y + TASKBAR_H / 2, { size: 15, color: fg, align: 'right' });
+    ui.text(formatCash(g.state.cash), tb.w - 70, tb.y + TASKBAR_H / 2, { size: 17, bold: true, color: fg, align: 'right', maxWidth: 110 });
+    ui.text(`▶ ${runningN}/${g.capacity()}`, tray + 8, tb.y + TASKBAR_H / 2, { size: 14, bold: true, color: fg, maxWidth: 66 });
+    // Window + minimized-game buttons.
+    const entries: { id: string; state: 'front' | 'open' | 'bg' | 'paused' }[] = [];
+    const wins = this.windows;
+    wins.forEach((id, i) => entries.push({ id, state: i === wins.length - 1 ? 'front' : 'open' }));
+    if (this.screenId) g.state.desk.min.forEach((id, i) => entries.push({ id, state: i < g.slots() ? 'bg' : 'paused' }));
+    const x0 = 110;
+    const avail = tray - x0 - 8;
+    const bw = entries.length ? Math.min(180, (avail - 6 * (entries.length - 1)) / entries.length) : 0;
+    entries.forEach((e, i) => {
+      const app = apps.find((a) => a.id === e.id);
       if (!app) return;
-      ui.button({ x: 126 + i * 190, y: tb.y + 6, w: 180, h: taskH - 12 }, `${app.icon} ${app.title}`, { size: 14 });
+      const mark = e.state === 'bg' ? '▶ ' : e.state === 'paused' ? '⏸ ' : '';
+      const r = { x: x0 + i * (bw + 6), y: tb.y + 6, w: bw, h: TASKBAR_H - 12 };
+      const label = bw < 70 ? `${mark}${app.icon}` : `${mark}${app.icon} ${app.title}`;
+      if (ui.button(r, label, { size: 13, primary: e.state === 'front' && dark, textColor: e.state === 'paused' ? '#999' : undefined })) this.launch(e.id);
     });
-    const s = this.game.state;
-    ui.text(`${formatCash(s.cash)}`, this.width - 190, tb.y + taskH / 2, { size: 18, bold: true, color: ui.theme.bevel ? '#111' : '#fff', align: 'right' });
-    ui.text(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), this.width - 16, tb.y + taskH / 2, {
-      size: 16, color: ui.theme.bevel ? '#111' : '#fff', align: 'right',
+  }
+
+  private drawStartMenu(full: Rect, apps: OsApp[]): void {
+    const ui = this.ui;
+    const g = this.game;
+    const cols = 2;
+    const rowH = 40;
+    const w = Math.min(520, this.vw - 12);
+    const rows = Math.ceil(apps.length / cols);
+    const head = 74;
+    const h = Math.min(this.vh - TASKBAR_H - 8, head + rows * rowH + 10);
+    const m = { x: 6, y: this.vh - TASKBAR_H - h, w, h };
+    ui.pushBounds(m, 'menu');
+    ui.panel(m, ui.theme.window, false);
+    ui.bevel(m);
+    ui.text(`${ui.theme.name} · ${this.name}`, m.x + 14, m.y + 20, { size: 16, bold: true, maxWidth: m.w - 28 });
+    ui.text(
+      `Running ${g.running().length}/${g.capacity()} · ${g.screenIds().length} screen${g.screenIds().length > 1 ? 's' : ''} × ${g.windowsPerScreen()} window${g.windowsPerScreen() > 1 ? 's' : ''} + ${g.slots()} background`,
+      m.x + 14, m.y + 46, { size: 12, color: ui.theme.muted, maxWidth: m.w - 28 },
+    );
+    const cw = (m.w - 20) / cols;
+    apps.forEach((app, i) => {
+      const r = { x: m.x + 10 + (i % cols) * cw, y: m.y + head + Math.floor(i / cols) * rowH, w: cw - 6, h: rowH - 4 };
+      if (r.y + r.h > m.y + m.h) return;
+      const running = g.isRunning(app.id);
+      if (ui.button(r, `${app.icon} ${app.title}${running ? '  ▶' : ''}`, { size: 14 })) this.launch(app.id);
     });
-    void full;
+    ui.popBounds();
+    if (!ui.clicked(m) && ui.clicked(full)) this.startOpen = false;
+  }
+
+  private drawDialog(full: Rect, d: CapacityDialog): void {
+    const ui = this.ui;
+    const g = this.game;
+    ui.rect(full, 'rgba(0,0,0,0.45)', 0);
+    const w = Math.min(600, this.vw - 40);
+    const h = 300;
+    const p = { x: (this.vw - w) / 2, y: Math.max(10, (this.vh - TASKBAR_H - h) / 2), w, h };
+    ui.pushBounds(p, 'dialog');
+    ui.panel(p, ui.theme.window, false);
+    ui.bevel(p);
+    const title = this.appTitle(d.app);
+    const paused = d.pauses.map((id) => this.appTitle(id)).join(', ');
+    ui.text(`⚠ No free window for ${title}`, p.x + 18, p.y + 26, { size: 19, bold: true, maxWidth: p.w - 36 });
+    let y = p.y + 50;
+    y += ui.paragraph(`Opening it here pauses ${paused}: games only earn while open on a screen (or minimized into a free background slot).`, { x: p.x + 18, y, w: p.w - 36, h: 60 }, 14) + 6;
+    ui.paragraph(
+      `Run more at once: 🖥️ Second-hand Monitor = +1 screen · 💻 Refurbished PC = +1 screen & +1 background slot · 🪟 TycoonOS XP = 2 windows per screen. You have ${g.screenIds().length} screen(s) × ${g.windowsPerScreen()} + ${g.slots()} background.`,
+      { x: p.x + 18, y, w: p.w - 36, h: 80 }, 13, ui.theme.muted,
+    );
+    const by = p.y + p.h - 112;
+    const bw = (p.w - 36 - 10) / 2;
+    if (d.elsewhere) {
+      if (ui.button({ x: p.x + 18, y: by, w: p.w - 36, h: 44 }, `🖥️ Open on ${screenName(d.elsewhere)} instead (free)`, { primary: true, size: 15 })) {
+        g.openApp(d.elsewhere, d.app);
+        this.dialog = null;
+      }
+    } else if (ui.button({ x: p.x + 18, y: by, w: p.w - 36, h: 44 }, '🛒 Get another screen in eBuy', { size: 15 })) {
+      this.dialog = null;
+      this.open('ebuy');
+    }
+    if (ui.button({ x: p.x + 18, y: by + 54, w: bw, h: 44 }, `Swap: pause ${paused}`, { color: '#a3561a', size: 14 })) {
+      this.open(d.app);
+      this.dialog = null;
+    }
+    if (ui.button({ x: p.x + 28 + bw, y: by + 54, w: bw, h: 44 }, 'Cancel', { size: 15 })) this.dialog = null;
+    ui.popBounds();
+    if (!ui.clicked(p) && ui.clicked(full)) this.dialog = null;
   }
 
   private drawWindow(app: OsApp, r: Rect): void {
     const ui = this.ui;
     const t = ui.theme;
+    ui.pushBounds(r, 'window');
     ui.rect(r, t.window);
     ui.bevel(r);
-    const title = { x: r.x + 3, y: r.y + 3, w: r.w - 6, h: 38 };
+    const title = { x: r.x + 3, y: r.y + 3, w: r.w - 6, h: TITLE_H };
     const gr = ui.g.createLinearGradient(title.x, 0, title.x + title.w, 0);
     gr.addColorStop(0, t.titlebar[0]);
     gr.addColorStop(1, t.titlebar[1]);
@@ -272,24 +473,43 @@ export class TycoonOS {
       ui.g.roundRect(title.x, title.y, title.w, title.h, [t.radius, t.radius, 0, 0]);
       ui.g.fill();
     } else ui.g.fillRect(title.x, title.y, title.w, title.h);
-    ui.emoji(app.icon, title.x + 22, title.y + title.h / 2, 22);
-    ui.text(app.title, title.x + 42, title.y + title.h / 2, { size: 18, bold: true, color: t.titleText });
-    if (ui.button({ x: title.x + title.w - 36, y: title.y + 5, w: 30, h: 28 }, '✕', { size: 15, color: t.bevel ? undefined : '#d9412b' })) {
-      this.close(app.id);
+    const game = this.game.isTycoon(app.id);
+    const btns = game ? 2 : 1;
+    ui.emoji(app.icon, title.x + 20, title.y + title.h / 2, 20);
+    ui.text(app.title, title.x + 38, title.y + title.h / 2, { size: 16, bold: true, color: t.titleText, maxWidth: title.w - 46 - btns * 34 });
+    const closeR = { x: title.x + title.w - 33, y: title.y + 4, w: 29, h: 26 };
+    if (game && ui.button({ ...closeR, x: closeR.x - 33 }, '–', { size: 15 })) {
+      this.minimize(app.id);
+      ui.popBounds();
       return;
     }
-    app.draw(ui, inset({ x: r.x, y: title.y + title.h, w: r.w, h: r.h - title.h - 3 }, 10), this);
+    if (ui.button(closeR, '✕', { size: 14, color: t.bevel ? undefined : '#d9412b' })) {
+      this.close(app.id);
+      ui.popBounds();
+      return;
+    }
+    const body = inset({ x: r.x, y: title.y + title.h, w: r.w, h: r.h - title.h - 3 }, 8);
+    ui.pushBounds(body, 'window');
+    const g = ui.g;
+    g.save();
+    g.beginPath();
+    g.rect(body.x - 2, body.y - 2, body.w + 4, body.h + 4);
+    g.clip();
+    app.draw(ui, body, this);
+    g.restore();
+    ui.popBounds();
+    ui.popBounds();
   }
 
   private drawToasts(): void {
     const ui = this.ui;
     this.toasts.forEach((t, i) => {
-      const w = 440;
-      const r = { x: this.width - w - 16, y: 16 + i * 62, w, h: 54 };
+      const w = Math.min(440, this.vw - 32);
+      const r = { x: this.vw - w - 16, y: 12 + i * 58, w, h: 50 };
       ui.g.globalAlpha = Math.min(1, t.t * 2);
       const col = t.tone === 'good' ? '#1f7a35' : t.tone === 'warn' ? '#a3561a' : t.tone === 'token' ? '#5b2a99' : '#1c2a44';
       ui.rect(r, col, 8);
-      ui.text(t.text, r.x + 16, r.y + r.h / 2, { size: 17, bold: true, color: '#fff', maxWidth: w - 32 });
+      ui.text(t.text, r.x + 14, r.y + r.h / 2, { size: 15, bold: true, color: '#fff', maxWidth: w - 28 });
       ui.g.globalAlpha = 1;
     });
     if (this.toasts.length) this.dirty = true;

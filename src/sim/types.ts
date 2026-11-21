@@ -2,6 +2,7 @@ import type { Num } from '@/core/num';
 import type { Rng } from '@/core/rng';
 import type { StatModifier } from '@/core/stats';
 import type { GarageState } from './garage/factory';
+import type { DeskState } from './desk';
 
 export const TOKENS = ['grind', 'mogul', 'chaos', 'pixel', 'golden'] as const;
 export type TokenId = (typeof TOKENS)[number];
@@ -65,6 +66,11 @@ export interface TycoonDef<S = unknown> {
 
 export interface TycoonRuntime<S = unknown> {
   id: string;
+  /**
+   * Running right now: open in a window on some screen, or minimized into a
+   * free background slot. Derived from `GameState.desk` (Game.syncDesk keeps it
+   * in sync); only running games tick, earn and continue offline.
+   */
   installed: boolean;
   money: number;
   lifetime: number;
@@ -197,4 +203,6 @@ export interface GameState {
   layout: Record<string, PropPose>;
   /** Phase 2 factory progress. */
   garage: GarageState;
+  /** Open windows per TycoonOS screen + minimized games (decides what runs). */
+  desk: DeskState;
 }

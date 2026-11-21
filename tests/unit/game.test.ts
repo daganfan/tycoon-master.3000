@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Game } from '@/sim/game';
-import { SAVE_VERSION, createInitialState } from '@/sim/state';
+import { BASE_EXCHANGE, SAVE_VERSION, createInitialState } from '@/sim/state';
 import { num } from '@/core/num';
 import { MemoryStore, deserialize, exportSave, importSave, readSave, serialize, writeSave } from '@/sim/save';
 
@@ -11,10 +11,22 @@ const fresh = () => {
 };
 
 describe('Game basics', () => {
-  it('starts with Lemon Mogul installed and one slot', () => {
+  it('starts with Lemon Mogul open on the main screen and no background slots', () => {
     const g = fresh();
     expect(g.state.tycoons.lemon_mogul?.installed).toBe(true);
-    expect(g.slots()).toBe(1);
+    expect(g.windowsOn('main')).toEqual(['lemon_mogul']);
+    expect(g.screenIds()).toEqual(['main']);
+    expect(g.windowsPerScreen()).toBe(1);
+    expect(g.slots()).toBe(0);
+    expect(g.capacity()).toBe(1);
+  });
+
+  it('starts with a low exchange rate', () => {
+    const g = fresh();
+    expect(g.exchangeRate()).toBeLessThan(0.5);
+    expect(g.exchangeRate()).toBeGreaterThan(0.2);
+    const product = g.exchangeBreakdown().reduce((a, e) => a * e.mult, 1);
+    expect(product).toBeCloseTo(g.exchangeRate());
   });
 
   it('earns internal money, cashes out to the floor, and collects', () => {
@@ -61,9 +73,14 @@ describe('Shop and stats', () => {
     const before = g.itemCost('used_monitor');
     expect(g.buyItem('used_monitor')).toBe(true);
     expect(g.itemCost('used_monitor').gt(before)).toBe(true);
-    expect(g.stat('tycoon.speed')).toBeCloseTo(1.12);
+    // A monitor is a screen, not a speed buff.
+    expect(g.stat('tycoon.speed')).toBeCloseTo(1);
+    expect(g.screenIds()).toEqual(['main', 'used_monitor#0']);
     g.buyItem('refurb_pc');
-    expect(g.slots()).toBe(2);
+    expect(g.screenIds()).toEqual(['main', 'used_monitor#0', 'refurb_pc#0']);
+    expect(g.slots()).toBe(1);
+    g.buyItem('desk_fan');
+    expect(g.stat('tycoon.speed')).toBeCloseTo(1.1);
   });
 
   it('respects item max', () => {
@@ -103,13 +120,15 @@ describe('Skill tree', () => {
 });
 
 describe('Tycoons', () => {
-  it('unlocks and respects slots', () => {
+  it('unlocks and respects screen capacity', () => {
     const g = fresh();
     g.state.cash = num(1e6);
     expect(g.unlockTycoon('rubber_duck_works')).toBe(true);
-    expect(g.state.tycoons.rubber_duck_works?.installed).toBe(false); // only 1 slot
-    g.buyItem('refurb_pc');
-    expect(g.setRunning('rubber_duck_works', true)).toBe(true);
+    expect(g.state.tycoons.rubber_duck_works?.installed).toBe(false); // bought, not open
+    expect(g.setRunning('rubber_duck_works', true)).toBe(false); // the only window shows Lemon Mogul
+    g.buyItem('used_monitor'); // a new screen picks up the idle game
+    expect(g.windowsOn('used_monitor#0')).toEqual(['rubber_duck_works']);
+    expect(g.isRunning('rubber_duck_works')).toBe(true);
   });
 
   it('duck belt jams and spawns physical ducks', () => {
@@ -180,7 +199,7 @@ describe('Chaos and cosmetics', () => {
     expect(g.equip('props', 'mod_gold')).toBe(false); // only one slot
     g.equip('props', 'mod_bouncy');
     expect(g.equip('props', 'mod_gold')).toBe(true);
-    expect(g.stat('exchange.rate')).toBeCloseTo(1.02);
+    expect(g.stat('exchange.rate')).toBeCloseTo(BASE_EXCHANGE * 1.02);
   });
 });
 

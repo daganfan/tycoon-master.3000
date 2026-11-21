@@ -30,7 +30,6 @@ interface ScreenEntry {
   acc: number;
 }
 
-const AUX_APPS = ['taskmgr', 'wallet', 'mail'];
 const FOV = 55;
 
 /** The 3D bedroom: rendering, physics, camera, input and screens. */
@@ -128,9 +127,10 @@ export class World {
     this.avatar.lookTarget = this.camera.position;
   }
 
-  private addScreen(mesh: THREE.Mesh, obj: PhysObj, w: number, h: number, label: string): ScreenEntry {
+  /** `screenId` ties the OS to the game's desk (which windows are open decides which games run). */
+  private addScreen(mesh: THREE.Mesh, obj: PhysObj, w: number, h: number, label: string, screenId: string): ScreenEntry {
     const res = label === 'main' ? 1 : 0.75;
-    const os = new TycoonOS(this.game, this.host, Math.round(1280 * res), Math.round(1280 * res * (h / w)), label);
+    const os = new TycoonOS(this.game, this.host, Math.round(1280 * res), Math.round(1280 * res * (h / w)), label, screenId);
     const tex = new THREE.CanvasTexture(os.canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 8;
@@ -138,18 +138,14 @@ export class World {
     (mesh.material as THREE.MeshBasicMaterial).needsUpdate = true;
     const e: ScreenEntry = { os, mesh, tex, obj, w, h, redraw: 0, acc: 0 };
     this.screens.push(e);
-    if (label !== 'main') {
-      os.boot(true);
-      const n = this.screens.length - 2;
-      const tycoons = this.game.running().map((r) => r.id);
-      os.open(label === 'pc' ? (tycoons[1] ?? tycoons[0] ?? 'appstore') : AUX_APPS[n % AUX_APPS.length]!);
-    }
+    // Extra screens are always on; what they show comes from the game's desk.
+    if (label !== 'main') os.boot(true);
     return e;
   }
 
   private setupScreens(): void {
     const s = this.room.screen;
-    this.addScreen(s.mesh, s.obj, s.w, s.h, 'main');
+    this.addScreen(s.mesh, s.obj, s.w, s.h, 'main', 'main');
     if (this.game.state.flags.includes('booted')) this.screens[0]!.os.boot(true);
   }
 
@@ -171,7 +167,7 @@ export class World {
       this.props.push(res.obj);
       res.obj.mesh.traverse((o) => o.name === 'spin' && this.spinners.push(o));
     }
-    if (res.screen) this.addScreen(res.screen.mesh, res.screen.obj, res.screen.w, res.screen.h, def.prop === 'pc' ? 'pc' : 'aux');
+    if (res.screen) this.addScreen(res.screen.mesh, res.screen.obj, res.screen.w, res.screen.h, def.prop === 'pc' ? 'pc' : 'aux', `${id}#${index}`);
   }
 
   private bindGame(): void {

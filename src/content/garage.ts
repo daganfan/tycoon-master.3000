@@ -101,7 +101,7 @@ export const MAX_SCRAP = 150;
 
 /** Garage-phase eBuy stock. Props for these are built by world/garage/garageProps.ts. */
 export const GARAGE_ITEMS: ItemDef[] = [
-  { id: 'g_power_strip', name: 'Industrial Power Strip', desc: '+1 game slot. Twelve outlets, one fuse.', icon: '🔌', category: 'hardware',
+  { id: 'g_power_strip', name: 'Industrial Power Strip', desc: '+1 background slot (a minimized game keeps running). Twelve outlets, one fuse.', icon: '🔌', category: 'hardware',
     baseCost: 1_200_000, growth: 1, max: 1, mods: [{ stat: 'slots', op: 'add', value: 1 }], phase: 'garage' },
   { id: 'g_shop_vac', name: 'Shop-Vac Coin Magnet', desc: '+1.5 m coin pickup radius. SHHHHHLUP.', icon: '🌪️', category: 'utility',
     baseCost: 350_000, growth: 3, max: 2, mods: [{ stat: 'magnet.radius', op: 'add', value: 1.5 }], phase: 'garage' },

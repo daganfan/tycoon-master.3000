@@ -6,7 +6,8 @@ import { clamp } from './protocol';
 
 /**
  * Co-op screens. When a guest uses one of the host's screens, the host runs a
- * private copy of the TycoonOS for that guest (own windows, own cursor) against
+ * private copy of the TycoonOS for that guest (own cursor; the windows are the
+ * screen's real windows, so guests open/close the same games the host sees) against
  * the host's REAL game, feeds it the guest's clicks, and streams small JPEG
  * frames back. The guest shows those frames on their copy of the monitor.
  */
@@ -30,10 +31,10 @@ export class VisitorScreen {
 
   constructor(world: World, index: number) {
     const src = world.screens[index]!.os;
-    this.os = new TycoonOS(world.game, VISITOR_HOST, src.width, src.height, src.label);
+    this.os = new TycoonOS(world.game, VISITOR_HOST, src.width, src.height, src.label, src.screenId);
     // Start from what the host's screen shows right now.
     this.os.screen = src.screen === 'off' ? 'off' : 'desktop';
-    this.os.windows = [...src.windows];
+    // Same screen id = same windows as the host's monitor (co-op: what runs is shared).
     this.small = document.createElement('canvas');
     this.small.width = Math.min(SCREEN_FRAME_W, src.width);
     this.small.height = Math.round((this.small.width * src.height) / src.width);

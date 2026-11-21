@@ -13,7 +13,7 @@ export const QUESTS: QuestDef[] = [
     done: (s) => c(s, 'cashouts') >= 1 },
   { id: 'q_collect', title: 'Pick it up', text: 'Collect 20 coins from the floor.', reward: 5,
     done: (s) => c(s, 'coinsCollected') >= 20 },
-  { id: 'q_monitor', title: 'Upgrade time', text: 'Buy a Second-hand Monitor in eBuy.', reward: 10,
+  { id: 'q_monitor', title: 'Upgrade time', text: 'Buy a Second-hand Monitor in eBuy: +1 screen, so you can run another game at once.', reward: 10,
     done: (s) => (s.items.used_monitor ?? 0) >= 1 },
   { id: 'q_node', title: 'Skill issue', text: 'Buy your first skill tree node (press T).', reward: 15,
     done: (s) => s.nodes.length > 1 },

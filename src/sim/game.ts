@@ -10,6 +10,7 @@ import { TYCOONS, tycoonById } from './tycoons';
 import { createRuntime, upgradeCost, xpForLevel } from './tycoons/framework';
 import { BASE_STATS, createInitialState } from './state';
 import { GarageSim, type PayoutSource } from './garage/factory';
+import { SCREEN_ITEMS, screenIdsFor, type DeskState } from './desk';
 import type {
   ChaosInfo, ChaosKind, CosmeticTarget, GameState, Phase, TokenCost, TokenId, TycoonCtx, TycoonDef, TycoonRuntime,
 } from './types';
@@ -66,10 +67,10 @@ export class Game {
     this.rng = new Rng(state.rngState);
     if (!state.tycoons.lemon_mogul) {
       const rt = createRuntime(tycoonById('lemon_mogul'), this.rng);
-      rt.installed = true;
       state.tycoons.lemon_mogul = rt;
     }
     this.rebuildStats();
+    this.syncDesk(false);
   }
 
   /* ---------------- stats ---------------- */
@@ -120,11 +121,30 @@ export class Game {
     return this.stat('exchange.rate') * (1 + 0.03 * this.stat('vibe'));
   }
 
+  /** Where the exchange rate comes from (multipliers that multiply to exchangeRate()). */
+  exchangeBreakdown(): { label: string; mult: number }[] {
+    const ex = (mods: StatModifier[] | undefined, n = 1) =>
+      (mods ?? []).reduce((a, m) => (m.stat === 'exchange.rate' && m.op === 'mult' ? a * Math.pow(m.value, n) : a), 1);
+    let skills = 1;
+    for (const id of this.state.nodes) skills *= ex(nodeById(id)?.effects.filter((e): e is StatModifier => 'stat' in e));
+    let gear = 1;
+    for (const [id, n] of Object.entries(this.state.items)) gear *= ex(itemById(id)?.mods, n);
+    const total = this.stat('exchange.rate') / (BASE_STATS['exchange.rate']! * skills * gear);
+    return [
+      { label: 'Starting rate', mult: BASE_STATS['exchange.rate']! },
+      { label: 'Skills (Business tree…)', mult: skills },
+      { label: 'Gear (eBuy items)', mult: gear },
+      { label: 'Cosmetics', mult: total },
+      { label: `Vibe ${formatVibe(this.stat('vibe'))} (+3% each)`, mult: 1 + 0.03 * this.stat('vibe') },
+    ];
+  }
+
   /* ---------------- tick ---------------- */
 
   tick(dt: number): void {
     const s = this.state;
     s.time += dt;
+    this.syncDesk();
     // Nothing runs until the crusty PC has been switched on.
     const booted = s.flags.includes('booted');
     for (const rt of booted ? this.running() : []) {
@@ -356,6 +376,13 @@ export class Game {
     this.state.cash = this.state.cash.sub(this.itemCost(id));
     const count = (this.state.items[id] = (this.state.items[id] ?? 0) + 1);
     this.stats.setSource(`item:${id}`, scaleMods(def.mods, count), def.flags ?? []);
+    if ((SCREEN_ITEMS as readonly string[]).includes(id)) {
+      // A new screen: put a game that is not running on it (or the Task Manager).
+      const sid = `${id}#${count - 1}`;
+      const idle = Object.values(this.state.tycoons).find((t) => !t.installed);
+      this.openApp(sid, idle?.id ?? 'taskmgr');
+    }
+    this.syncDesk();
     if (id === 'garage_key') {
       this.setFlag('phase:garage');
       this.bus.emit('notify', { text: '🔑 The Garage is open! Walk through the bedroom door.', tone: 'good' });
@@ -364,14 +391,198 @@ export class Game {
     return true;
   }
 
-  /* ---- app store / tycoon slots ---- */
+  /* ---- screens, windows & what runs (see desk.ts) ---- */
 
-  slotsUsed(): number {
-    return this.running().length;
+  /** Every screen in the room: the main PC, each Second-hand Monitor and each Refurbished PC. */
+  screenIds(): string[] {
+    return screenIdsFor(this.state.items);
   }
 
+  /** Windows each screen can show at once (TycoonOS 95 = 1, XP = 2, …). */
+  windowsPerScreen(): number {
+    return 1 + Math.max(0, Math.floor(this.stat('os.tier')));
+  }
+
+  /** Background slots: how many minimized games keep running. */
   slots(): number {
-    return Math.floor(this.stat('slots'));
+    return Math.max(0, Math.floor(this.stat('slots')));
+  }
+
+  /** Background slots in use. */
+  slotsUsed(): number {
+    return Math.min(this.slots(), this.state.desk.min.length);
+  }
+
+  /** Most games that can run at once: every window on every screen + background slots. */
+  capacity(): number {
+    return this.screenIds().length * this.windowsPerScreen() + this.slots();
+  }
+
+  /** Open windows on a screen (oldest first; the last is in front). */
+  windowsOn(screenId: string): string[] {
+    return (this.state.desk.screens[screenId] ??= []);
+  }
+
+  isTycoon(appId: string): boolean {
+    return !!this.state.tycoons[appId];
+  }
+
+  isRunning(id: string): boolean {
+    return !!this.state.tycoons[id]?.installed;
+  }
+
+  /** Where a game is right now. */
+  whereIs(id: string): { screen: string } | { minimized: true; running: boolean } | null {
+    for (const sid of this.screenIds()) if (this.windowsOn(sid).includes(id)) return { screen: sid };
+    const i = this.state.desk.min.indexOf(id);
+    if (i >= 0) return { minimized: true, running: i < this.slots() };
+    return null;
+  }
+
+  /** First screen (preferring `prefer`) that has a free window. */
+  freeScreen(prefer?: string): string | null {
+    const ids = this.screenIds();
+    const order = prefer && ids.includes(prefer) ? [prefer, ...ids.filter((i) => i !== prefer)] : ids;
+    return order.find((sid) => this.windowsOn(sid).length < this.windowsPerScreen()) ?? null;
+  }
+
+  /**
+   * What opening `appId` on `screenId` would do: which window gets pushed out
+   * (minimized if it is a game, closed otherwise) and which running games would
+   * pause because of it.
+   */
+  planOpen(screenId: string, appId: string): { evict: string | null; pauses: string[] } {
+    const before = new Set(this.running().map((r) => r.id));
+    const snapshot = JSON.stringify(this.state.desk);
+    const evict = this.openUnsynced(screenId, appId);
+    const after = new Set(this.computeRunning());
+    this.state.desk = JSON.parse(snapshot) as DeskState;
+    return { evict, pauses: [...before].filter((id) => !after.has(id)) };
+  }
+
+  /** Open an app (or bring it to the front) in a window on a screen. A game moves here from wherever it was. */
+  openApp(screenId: string, appId: string): boolean {
+    if (!this.screenIds().includes(screenId)) return false;
+    this.openUnsynced(screenId, appId);
+    this.syncDesk();
+    return true;
+  }
+
+  private openUnsynced(screenId: string, appId: string): string | null {
+    const desk = this.state.desk;
+    const win = this.windowsOn(screenId);
+    if (this.isTycoon(appId)) {
+      for (const sid of Object.keys(desk.screens)) if (sid !== screenId) desk.screens[sid] = desk.screens[sid]!.filter((w) => w !== appId);
+      desk.min = desk.min.filter((m) => m !== appId);
+    }
+    const at = win.indexOf(appId);
+    if (at >= 0) {
+      win.splice(at, 1);
+      win.push(appId);
+      return null;
+    }
+    let evict: string | null = null;
+    while (win.length >= this.windowsPerScreen()) {
+      evict = win.shift()!;
+      if (this.isTycoon(evict)) desk.min.push(evict);
+    }
+    win.push(appId);
+    return evict;
+  }
+
+  /**
+   * Close a window. A closed game stops. If that frees a window, the most
+   * recently minimized paused game comes back into it.
+   */
+  closeApp(screenId: string, appId: string): void {
+    const desk = this.state.desk;
+    const win = this.windowsOn(screenId);
+    desk.screens[screenId] = win.filter((w) => w !== appId);
+    if (this.isTycoon(appId)) desk.min = desk.min.filter((m) => m !== appId);
+    this.restorePaused(screenId);
+    this.syncDesk();
+  }
+
+  /** Minimize a game to the taskbar: it keeps running only if a background slot is free. */
+  minimizeApp(screenId: string, appId: string): void {
+    const desk = this.state.desk;
+    desk.screens[screenId] = this.windowsOn(screenId).filter((w) => w !== appId);
+    if (this.isTycoon(appId) && !desk.min.includes(appId)) desk.min.push(appId);
+    this.syncDesk();
+  }
+
+  /** Stop a game wherever it is (Task Manager / App Store). */
+  stopGame(id: string): void {
+    const desk = this.state.desk;
+    for (const sid of Object.keys(desk.screens)) desk.screens[sid] = desk.screens[sid]!.filter((w) => w !== id);
+    desk.min = desk.min.filter((m) => m !== id);
+    this.syncDesk();
+  }
+
+  private restorePaused(screenId: string): void {
+    const desk = this.state.desk;
+    const win = this.windowsOn(screenId);
+    const paused = desk.min.slice(this.slots());
+    const back = paused.at(-1);
+    if (back && win.length < this.windowsPerScreen()) {
+      desk.min = desk.min.filter((m) => m !== back);
+      win.unshift(back);
+    }
+  }
+
+  /**
+   * Start (or stop) a game without pushing anything else out: opens it on a
+   * screen with a free window, else minimizes it into a free background slot.
+   * Returns false when everything is full.
+   */
+  setRunning(id: string, on: boolean): boolean {
+    const rt = this.state.tycoons[id];
+    if (!rt) return false;
+    if (!on) {
+      this.stopGame(id);
+      return true;
+    }
+    if (rt.installed) return true;
+    const sid = this.freeScreen();
+    if (sid) return this.openApp(sid, id);
+    if (this.state.desk.min.length < this.slots()) {
+      this.state.desk.min = this.state.desk.min.filter((m) => m !== id);
+      this.state.desk.min.unshift(id);
+      this.syncDesk();
+      return this.isRunning(id);
+    }
+    return false;
+  }
+
+  private computeRunning(): string[] {
+    const desk = this.state.desk;
+    const out: string[] = [];
+    for (const sid of this.screenIds()) for (const w of desk.screens[sid] ?? []) if (this.isTycoon(w) && !out.includes(w)) out.push(w);
+    for (const m of desk.min.slice(0, this.slots())) if (this.isTycoon(m) && !out.includes(m)) out.push(m);
+    return out;
+  }
+
+  /** Recompute which games run; announces games that start or pause. */
+  syncDesk(announce = true): void {
+    const desk = this.state.desk;
+    const cap = this.windowsPerScreen();
+    for (const sid of Object.keys(desk.screens)) {
+      const win = desk.screens[sid]!;
+      while (win.length > cap) {
+        const out = win.shift()!;
+        if (this.isTycoon(out) && !desk.min.includes(out)) desk.min.push(out);
+      }
+    }
+    desk.min = desk.min.filter((m, i) => this.isTycoon(m) && desk.min.indexOf(m) === i);
+    const on = new Set(this.computeRunning());
+    for (const rt of Object.values(this.state.tycoons)) {
+      const now = on.has(rt.id);
+      if (now === rt.installed) continue;
+      rt.installed = now;
+      if (!announce) continue;
+      const def = tycoonById(rt.id);
+      this.bus.emit('notify', { text: now ? `▶ ${def.name} running` : `⏸ ${def.name} paused`, tone: now ? 'good' : 'warn' });
+    }
   }
 
   canUnlockTycoon(id: string): boolean {
@@ -380,24 +591,15 @@ export class Game {
     return this.state.cash.gte(def.unlockCost);
   }
 
+  /** Buy a game. It starts closed: open it on a screen to make it run. */
   unlockTycoon(id: string): boolean {
     if (!this.canUnlockTycoon(id)) return false;
     const def = tycoonById(id);
     this.state.cash = this.state.cash.sub(def.unlockCost);
     const rt = createRuntime(def as TycoonDef<unknown>, this.rng);
     this.state.tycoons[id] = rt;
-    if (this.slotsUsed() < this.slots()) rt.installed = true;
     this.bus.emit('tycoonInstalled', { id });
     this.bus.emit('notify', { text: `${def.icon} ${def.name} installed!`, tone: 'good' });
-    return true;
-  }
-
-  /** Start/stop a game in a slot. */
-  setRunning(id: string, on: boolean): boolean {
-    const rt = this.state.tycoons[id];
-    if (!rt) return false;
-    if (on && !rt.installed && this.slotsUsed() >= this.slots()) return false;
-    rt.installed = on;
     return true;
   }
 
@@ -428,6 +630,7 @@ export class Game {
     for (const [t, v] of Object.entries(def.cost)) this.state.tokens[t as TokenId] -= v;
     this.state.nodes.push(id);
     this.applyNode(id);
+    this.syncDesk();
     this.bus.emit('nodeBought', { id });
     return true;
   }
@@ -448,6 +651,7 @@ export class Game {
     }
     this.state.nodes = ['root'];
     this.rebuildStats();
+    this.syncDesk();
     this.bus.emit('respec', {});
     return true;
   }
@@ -563,6 +767,8 @@ export class Game {
     return { seconds: capped, cash };
   }
 }
+
+const formatVibe = (v: number): string => (Math.round(v * 100) / 100).toString();
 
 function scaleMods(mods: StatModifier[], count: number): StatModifier[] {
   return mods.map((m) => ({

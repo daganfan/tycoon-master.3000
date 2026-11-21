@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { runBot } from './bot';
 
-/** Pacing targets from GDD §4 / Implementation Plan §6 (Bedroom ≈ 1–2 h for an efficient player). */
+/**
+ * Pacing targets from GDD §4 / Implementation Plan §6 (Bedroom ≈ 1.5–2 h for an
+ * efficient player; real players are slower). Cash starts at a low exchange rate
+ * (x0.30) that upgrades raise to ≈ x1 by the Garage Key.
+ */
 describe('balance: Bedroom pacing', () => {
   const r = runBot(3 * 3600, 1.5);
 
@@ -18,9 +22,9 @@ describe('balance: Bedroom pacing', () => {
     expect(r.couch!).toBeGreaterThan(r.socks!);
   });
 
-  it('garage key takes 60–120 minutes', () => {
+  it('garage key takes 75–120 minutes', () => {
     expect(r.garage).toBeDefined();
-    expect(r.garage!).toBeGreaterThan(60 * 60);
+    expect(r.garage!).toBeGreaterThan(75 * 60);
     expect(r.garage!).toBeLessThan(120 * 60);
   });
 
@@ -37,7 +41,7 @@ describe('balance: Bedroom pacing', () => {
     for (const seed of [7, 99]) {
       const o = runBot(3 * 3600, 1.5, seed);
       expect(o.garage, `seed ${seed}`).toBeDefined();
-      expect(o.garage!).toBeGreaterThan(60 * 60);
+      expect(o.garage!).toBeGreaterThan(75 * 60);
       expect(o.garage!).toBeLessThan(120 * 60);
     }
   });

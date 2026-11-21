@@ -20,7 +20,7 @@ export const rubberDuckWorks = defineTycoon<DuckState>({
   icon: '🦆',
   color: '#ffcc2e',
   phase: 'bedroom',
-  unlockCost: 120,
+  unlockCost: 60,
   currency: 'Q¢',
   rate: 0.8,
   upgrades: [
