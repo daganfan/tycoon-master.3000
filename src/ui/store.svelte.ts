@@ -20,6 +20,8 @@ export const ui = $state<{
   /** Mouse captured (pointer lock) / pointer lock usable at all. */
   locked: boolean;
   lockable: boolean;
+  /** True while Tidy Up is running or cooling down. */
+  tidyBusy?: () => boolean;
   /** Capture / free the mouse. */
   capture?: () => void;
   releasePointer?: () => void;

@@ -98,6 +98,8 @@ export interface ItemDef {
   /** Which prop the world spawns for each unit. */
   prop?: string;
   phase: Phase;
+  /** Only for sale while this state flag is set (services like the Window Guy). */
+  needsFlag?: string;
 }
 
 export type NodeEffect = StatModifier | { flag: string };
@@ -211,4 +213,6 @@ export interface GameState {
   garage: GarageState;
   /** Open windows per TycoonOS screen + minimized games (decides what runs). */
   desk: DeskState;
+  /** Unlocked achievement ids. */
+  achievements: string[];
 }

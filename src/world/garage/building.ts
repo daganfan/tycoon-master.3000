@@ -90,8 +90,8 @@ export function buildGarageShell(scene: THREE.Scene, phys: Physics): GarageShell
   wallPlane(D, h, wallMatS, new THREE.Vector3(x0, h / 2, CZ), Math.PI / 2);
   wallPlane(D, h, wallMatS, new THREE.Vector3(x1, h / 2, CZ), -Math.PI / 2);
   // Colliders (north wall pieces sit inside the bedroom wall's thickness).
-  const nz = (ROOM.hz + z0) / 2;
-  const nt = (z0 - ROOM.hz) / 2;
+  const nz = (ROOM.z1 + z0) / 2;
+  const nt = (z0 - ROOM.z1) / 2;
   phys.staticBox({ x: (dl - x0) / 2, y: h / 2, z: nt }, { x: (x0 + dl) / 2, y: h / 2, z: nz });
   phys.staticBox({ x: (x1 - dr) / 2, y: h / 2, z: nt }, { x: (dr + x1) / 2, y: h / 2, z: nz });
   phys.staticBox({ x: DOOR.w / 2, y: (h - DOOR.h) / 2, z: nt }, { x: DOOR.x, y: (h + DOOR.h) / 2, z: nz });
@@ -102,9 +102,9 @@ export function buildGarageShell(scene: THREE.Scene, phys: Physics): GarageShell
 
   // Door jamb lining the hole through the wall, plus trim on the garage side.
   const jamb = mat('#e8e2d4', 0.55);
-  for (const [w, hh, d, x, y] of [[0.04, DOOR.h, z0 - ROOM.hz, dl - 0.02, DOOR.h / 2], [0.04, DOOR.h, z0 - ROOM.hz, dr + 0.02, DOOR.h / 2], [DOOR.w + 0.08, 0.04, z0 - ROOM.hz, DOOR.x, DOOR.h + 0.02]] as const) {
+  for (const [w, hh, d, x, y] of [[0.04, DOOR.h, z0 - ROOM.z1, dl - 0.02, DOOR.h / 2], [0.04, DOOR.h, z0 - ROOM.z1, dr + 0.02, DOOR.h / 2], [DOOR.w + 0.08, 0.04, z0 - ROOM.z1, DOOR.x, DOOR.h + 0.02]] as const) {
     const j = new THREE.Mesh(new THREE.BoxGeometry(w, hh, d), jamb);
-    j.position.set(x, y, (ROOM.hz + z0) / 2);
+    j.position.set(x, y, (ROOM.z1 + z0) / 2);
     add(j);
   }
   for (const [w, hh, x, y] of [[0.07, DOOR.h + 0.07, dl - 0.035, (DOOR.h + 0.07) / 2], [0.07, DOOR.h + 0.07, dr + 0.035, (DOOR.h + 0.07) / 2], [DOOR.w + 0.14, 0.07, DOOR.x, DOOR.h + 0.035]] as const) {

@@ -5,7 +5,9 @@ import { cosmeticById } from '@/content/cosmetics';
 import type { CosmeticTarget, PhysicsPatch } from '@/sim/types';
 import { TycoonOS, type OsHost } from '@/os/os';
 import { initRapier, Physics, type PhysObj } from './physics';
-import { buildRoom, type RoomRefs } from './room';
+import { buildRoom, FURNITURE_HOME, ROOM, SPAWN, type RoomRefs } from './room';
+import { Fixtures } from './fixtures';
+import { WindowGlass } from './windowGlass';
 import { Graphics, type Quality } from './render';
 import { Lighting } from './lighting';
 import { Cash } from './cash';
@@ -64,6 +66,10 @@ export class World {
   private fx?: CosmeticFx;
   /** Phase 2: the garage behind the bedroom door. */
   garage?: Garage;
+  /** Light switch, door, drawers, curtains, PC power button. */
+  fixtures?: Fixtures;
+  /** The breakable bedroom window. */
+  glass?: WindowGlass;
 
   private constructor(
     readonly canvas: HTMLCanvasElement,
@@ -87,6 +93,8 @@ export class World {
     this.interact = new Interact(this);
     this.chaos = new ChaosDetector(game, avatar, (o) => this.interact.busy(o), () => this.sfx.thud());
     for (const id of ['desk', 'pc', 'monitor', 'chair'] as const) this.interact.register(room[id], id);
+    for (const [id, o] of Object.entries(room.furniture)) this.interact.register(o, id);
+    this.interact.onPlaced = (o, moved) => game.bus.emit('world', { kind: 'placed', object: o.id, value: moved });
   }
 
   /** Camera yaw (used by grab/carry to know what's "in front"). */
@@ -138,7 +146,7 @@ export class World {
     const scene = new THREE.Scene();
     const room = buildRoom(scene, phys);
     const cash = new Cash(phys, scene);
-    const avatar = new Avatar(phys, scene, new THREE.Vector3(0.3, 1, 0.6));
+    const avatar = new Avatar(phys, scene, new THREE.Vector3(SPAWN.x, SPAWN.y, SPAWN.z));
     const w = new World(canvas, game, host, phys, room, cash, avatar, renderer);
     w.fx = new CosmeticFx({ game, phys, cash, roots: (t) => w.targetObjects(t), bodies: (t) => w.targetBodies(t) });
     w.gfx = gfx;
@@ -146,13 +154,14 @@ export class World {
     while (scene.children.length) w.scene.add(scene.children[0]!);
     w.setupLights();
     w.garage = new Garage(w);
+    w.setupFixtures();
     w.setupScreens();
     w.restoreItems();
     w.applyCosmetics();
     w.bindGame();
     w.bindInput();
     w.resize();
-    cash.restorePile(game.state.floorCash, new THREE.Vector3(0.9, 0, -1.4));
+    cash.restorePile(game.state.floorCash, new THREE.Vector3(FURNITURE_HOME.desk.x + 1.25, 0, ROOM.z0 + 1.1));
     return w;
   }
 
@@ -163,6 +172,29 @@ export class World {
     this.gfx.setQuality(this.game.state.settings.quality ?? 'auto');
     this.gfx.attach(this.scene, this.camera);
     this.avatar.lookTarget = this.camera.position;
+  }
+
+  private setupFixtures(): void {
+    this.fixtures = new Fixtures({
+      game: this.game,
+      avatar: this.avatar,
+      camera: this.camera,
+      scene: this.scene,
+      room: this.room,
+      sfx: this.sfx,
+      yaw: () => this.yaw,
+      ceilingLamp: () => this.lighting?.lamp ?? null,
+      toggleDoor: () => this.garage?.toggleDoor() ?? 'locked',
+      pcPower: () => this.screens[0]?.os.boot(),
+      nearestScreenDist: () => {
+        const s = this.nearestScreen();
+        return s ? s.mesh.getWorldPosition(new THREE.Vector3()).distanceTo(this.avatar.position) : Infinity;
+      },
+      held: () => this.interact.held?.obj ?? null,
+    });
+    this.glass = new WindowGlass(this.game, this.phys, this.scene, this.room, this.sfx);
+    this.game.bus.on('world', (e) => e.kind === 'windowBroken' && this.fixtures?.gust());
+    this.game.bus.on('achievement', () => this.sfx.fanfare());
   }
 
   /** `screenId` ties the OS to the game's desk (which windows are open decides which games run). */
@@ -327,6 +359,8 @@ export class World {
           this.setFocus(this.screens[this.aim.index] ?? null);
           return true;
         }
+        // Clicking a fixture (switch, drawer, curtain…) uses it instead of grabbing.
+        if (e.button === 0 && !this.interact.held && this.fixtures?.click(crosshair ? new THREE.Vector2(0, 0) : this.ndc(e))) return true;
         return this.interact.pointerDown(e, crosshair);
       },
       worldUp: (e) => this.interact.pointerUp(e),
@@ -362,9 +396,11 @@ export class World {
   }
 
   private onKey(code: string): void {
-    if (code === 'KeyE') this.toggleFocus();
+    // E: use a fixture (light switch, door, drawer, PC power…) first, else a screen.
+    if (code === 'KeyE' && (this.focus || !this.fixtures?.useNearest())) this.toggleFocus();
     if (code === 'Escape' && this.focus) this.setFocus(null, false);
     if (this.focus) return;
+    if (code === 'KeyH') this.interact.setHomeHere();
     if (code === 'KeyV') this.toggleCamMode();
     if (code === 'KeyF') this.chaos.tryFlop();
     if (code === 'KeyG') this.interact.toggleGrab();
@@ -472,7 +508,10 @@ export class World {
     this.garage?.update(dt);
 
     this.netHooks?.prePhysics(dt);
+    this.phys.setComfort(comfort);
+    this.glass?.update(dt, this.phys.objs, this.interact.held?.obj ?? null);
     this.phys.update(dt);
+    this.fixtures?.update(dt, this.phys.objs);
     this.avatar.postSync();
 
     // Cash magnet / pickup
@@ -507,7 +546,7 @@ export class World {
 
     // Hint text
     const near = this.nearestScreen();
-    const extra = this.focus ? '' : this.garage?.hint() || this.interact.hint() || this.chaos.hint();
+    const extra = this.focus ? '' : this.garage?.hint() || this.interact.hint() || this.fixtures?.hint() || this.chaos.hint();
     this.hint = this.focus
       ? 'Click the screen to play · Esc / E to step back'
       : extra

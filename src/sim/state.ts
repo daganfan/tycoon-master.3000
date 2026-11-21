@@ -3,7 +3,7 @@ import type { GameState } from './types';
 import { createGarageState } from './garage/factory';
 import { createDesk } from './desk';
 
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 
 /** Starting exchange rate (internal money → Cash) before any upgrades. */
 export const BASE_EXCHANGE = 0.3;
@@ -67,5 +67,6 @@ export function createInitialState(seed = Date.now() >>> 0, now = Date.now()): G
     layout: {},
     garage: createGarageState(),
     desk: createDesk(),
+    achievements: [],
   };
 }

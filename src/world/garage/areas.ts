@@ -14,15 +14,15 @@ export interface Area {
 }
 
 export const AREAS: Area[] = [
-  { id: 'bedroom', x0: -ROOM.hx, x1: ROOM.hx, z0: -ROOM.hz, z1: ROOM.hz, h: ROOM.h },
+  { id: 'bedroom', x0: ROOM.x0, x1: ROOM.x1, z0: ROOM.z0, z1: ROOM.z1, h: ROOM.h },
   { id: 'garage', x0: GARAGE.x0, x1: GARAGE.x1, z0: GARAGE.z0, z1: GARAGE.z1, h: GARAGE.h },
 ];
 
 /** The doorway between the bedroom and the garage. */
-export const DOORWAY = { x0: DOOR.x - DOOR.w / 2, x1: DOOR.x + DOOR.w / 2, z0: ROOM.hz - 0.2, z1: GARAGE.z0 + 0.2, h: DOOR.h };
+export const DOORWAY = { x0: DOOR.x - DOOR.w / 2, x1: DOOR.x + DOOR.w / 2, z0: ROOM.z1 - 0.2, z1: GARAGE.z0 + 0.2, h: DOOR.h };
 
 export function areaAt(p: THREE.Vector3Like): Area {
-  return p.z > (ROOM.hz + GARAGE.z0) / 2 ? AREAS[1]! : AREAS[0]!;
+  return p.z > (ROOM.z1 + GARAGE.z0) / 2 ? AREAS[1]! : AREAS[0]!;
 }
 
 /** Inside any area (with a margin), above the floor and below the ceiling. */
@@ -65,7 +65,7 @@ function clampToAreas(cam: THREE.Vector3, target: THREE.Vector3): void {
     cam.z = THREE.MathUtils.clamp(cam.z, AREAS[0]!.z0 + m, AREAS[1]!.z1 - m);
     cam.y = THREE.MathUtils.clamp(cam.y, 0.3, DOORWAY.h - 0.1);
     // Once fully on one side, clamp to that room as usual.
-    if (cam.z < ROOM.hz - 0.05 || cam.z > GARAGE.z0 + 0.05) {
+    if (cam.z < ROOM.z1 - 0.05 || cam.z > GARAGE.z0 + 0.05) {
       const b = areaAt(cam);
       cam.x = THREE.MathUtils.clamp(cam.x, b.x0 + m, b.x1 - m);
       cam.y = THREE.MathUtils.clamp(cam.y, 0.3, b.h - m);

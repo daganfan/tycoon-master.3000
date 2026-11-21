@@ -30,7 +30,7 @@ export interface GarageHost {
 }
 
 const DOOR_OPEN = -1.45;
-const DOORWAY_BOX = new THREE.Box3(new THREE.Vector3(DOOR.x - DOOR.w / 2, 0, ROOM.hz - 0.05), new THREE.Vector3(DOOR.x + DOOR.w / 2, DOOR.h, GARAGE.z0 + 0.05));
+const DOORWAY_BOX = new THREE.Box3(new THREE.Vector3(DOOR.x - DOOR.w / 2, 0, ROOM.z1 - 0.05), new THREE.Vector3(DOOR.x + DOOR.w / 2, DOOR.h, GARAGE.z0 + 0.05));
 
 /**
  * Phase 2 in the 3D world: the garage behind the bedroom door, the door
@@ -118,6 +118,20 @@ export class Garage {
     this.unlockSign();
   }
 
+  /** Open or close the door by hand. Without the Garage Key it only rattles. */
+  toggleDoor(): 'open' | 'closed' | 'locked' {
+    if (!this.unlocked()) {
+      this.rattle = 0.6;
+      this.rattleCd = 1.6;
+      this.lockedHint = 2;
+      this.sound.rattle();
+      return 'locked';
+    }
+    this.doorTarget = this.doorTarget === 0 ? DOOR_OPEN : 0;
+    this.sound.creak();
+    return this.doorTarget === 0 ? 'closed' : 'open';
+  }
+
   private unlockSign(): void {
     if (this.signUnlocked) return;
     this.signUnlocked = true;
@@ -136,7 +150,7 @@ export class Garage {
 
   private updateDoor(dt: number): void {
     const p = this.w.avatar.position;
-    const nearDoor = Math.abs(p.x - DOOR.x) < DOOR.w / 2 + 0.15 && p.z > ROOM.hz - 0.75 && p.z < ROOM.hz + 0.1;
+    const nearDoor = Math.abs(p.x - DOOR.x) < DOOR.w / 2 + 0.15 && p.z > ROOM.z1 - 0.75 && p.z < ROOM.z1 + 0.1;
     this.rattleCd -= dt;
     if (!this.unlocked()) {
       if (nearDoor) {

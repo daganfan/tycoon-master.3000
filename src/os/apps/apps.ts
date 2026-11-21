@@ -13,6 +13,7 @@ import { splitH, type Rect, type Ui } from '../ui';
 import { VIEWS } from './views';
 import { junkMart } from './junkmart';
 import { netplay } from './netplay'; // multiplayer (src/net)
+import { trophies } from './trophies';
 
 const scrolls = new Map<string, number>();
 
@@ -172,7 +173,7 @@ const ebuy: OsApp = {
     const game = os.game;
     const hit = tabs(ui, { x: r.x, y: r.y, w: r.w, h: 32 }, CATS, CATS.findIndex((c) => c.id === shopCat));
     if (hit >= 0) shopCat = CATS[hit]!.id;
-    const items = ITEMS.filter((i) => (shopCat === 'all' || i.category === shopCat) && game.phaseOpen(i.phase));
+    const items = ITEMS.filter((i) => (shopCat === 'all' || i.category === shopCat) && game.phaseOpen(i.phase) && (!i.needsFlag || game.state.flags.includes(i.needsFlag)));
     list(ui, 'ebuy', { x: r.x, y: r.y + 40, w: r.w, h: r.h - 40 }, items, 78, (it, rr) => {
       const owned = game.state.items[it.id] ?? 0;
       const maxed = owned >= it.max;
@@ -455,4 +456,4 @@ const settings: OsApp = {
   },
 };
 
-export const builtinApps: OsApp[] = [ebuy, junkMart, appStore, skills, wardrobe, wallet, mail, taskmgr, settings, netplay];
+export const builtinApps: OsApp[] = [ebuy, junkMart, appStore, skills, wardrobe, wallet, mail, taskmgr, trophies, settings, netplay];

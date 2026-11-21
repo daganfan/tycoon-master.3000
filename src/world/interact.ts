@@ -5,6 +5,9 @@ import type { PropPose } from '@/sim/types';
 import type { Physics, PhysObj } from './physics';
 import type { Avatar } from './avatar';
 import { insideAny } from './garage/areas';
+import { SPAWN } from './room';
+import { comfortTuning } from './physics';
+import { deliberatePlacement, settleVerdict, tidyOrder, TIDY_COOLDOWN, type TidyItem } from './tidy';
 
 /** What the interaction system needs from the world (kept small to avoid tight coupling). */
 export interface InteractHost {
@@ -33,6 +36,8 @@ interface Tween {
   dur: number;
   delay: number;
   arc: number;
+  /** Part of a Tidy Up batch: colliders are off while it flies, everything lands together. */
+  batch: boolean;
 }
 
 interface Held {
@@ -42,10 +47,17 @@ interface Held {
   heavy: boolean;
   byMouse: boolean;
   damping: number;
+  /** World time it was grabbed. */
+  since: number;
+}
+
+interface PendingHome {
+  since: number;
+  at: THREE.Vector3;
 }
 
 const TOYS = new Set(['duck', 'sock', 'remote']);
-const HEAVY_KINDS = new Set(['desk', 'table']);
+const HEAVY_KINDS = new Set(['desk', 'table', 'bed', 'bookcase', 'dresser']);
 const HEAVY_MASS = 20;
 const REACH = 2.2;
 const SAVE_EVERY = 1;
@@ -66,7 +78,12 @@ export class Interact {
   private raycaster = new THREE.Raycaster();
   private now = 0;
   private saveAcc = 0;
-  private pendingHome = new Map<PhysObj, number>();
+  private pendingHome = new Map<PhysObj, PendingHome>();
+  private tidyBatch: { objs: PhysObj[]; left: number; start: number } | null = null;
+  private tidyReadyAt = 0;
+  private savedGroups = new Map<number, number>();
+  /** Called when the player deliberately sets something down at a new home (for achievements). */
+  onPlaced: (o: PhysObj, moved: number) => void = () => {};
 
   constructor(private readonly w: InteractHost) {}
 
@@ -85,12 +102,12 @@ export class Interact {
   register(o: PhysObj, id: string): void {
     o.id = id;
     const pose = this.w.game.state.layout[id];
-    if (!pose) return;
+    if (!pose || !validPose(pose.p) || !validPose(pose.q)) return;
     const p = new THREE.Vector3(...pose.p);
-    if (!inside(p)) return;
+    if (!inside(p, 0)) return;
     o.body.setTranslation(p, true);
     o.body.setRotation(new THREE.Quaternion(...pose.q), true);
-    if (pose.hp && pose.hq && inside(new THREE.Vector3(...pose.hp))) {
+    if (pose.hp && pose.hq && validPose(pose.hp) && validPose(pose.hq) && inside(new THREE.Vector3(...pose.hp), 0)) {
       o.home.pos.set(...pose.hp);
       o.home.quat.set(...pose.hq);
     }
@@ -99,7 +116,7 @@ export class Interact {
   }
 
   isHeavy(o: PhysObj): boolean {
-    return HEAVY_KINDS.has(o.kind) || o.body.mass() > HEAVY_MASS;
+    return !!o.heavy || HEAVY_KINDS.has(o.kind) || o.body.mass() > HEAVY_MASS;
   }
 
   /* ------------------------------------------------------------ input */
@@ -150,18 +167,81 @@ export class Interact {
     return true;
   }
 
-  /** Return every furniture/prop to its home (spawn spot or last deliberate placement). */
+  /**
+   * Return every furniture/prop to its home (spawn spot or last deliberate
+   * placement). Things fly back with their colliders off, supports first,
+   * then all land in the same frame with zero velocity and go to sleep, so a
+   * second Tidy finds nothing to do. Returns how many objects move, or -1 if
+   * a tidy is still running / cooling down.
+   */
   tidyAll(): number {
+    if (this.tidyBatch || this.now < this.tidyReadyAt) return -1;
     if (this.held) this.release(false);
-    let n = 0;
+    const byId = new Map<string, PhysObj>();
+    const items: TidyItem[] = [];
     for (const o of this.layoutObjs()) {
-      const far = o.body.translation();
-      const moved = v3(far).distanceTo(o.home.pos) > 0.03 || quatAngle(rot(o), o.home.quat) > 0.05;
-      if (!moved) continue;
-      this.tweenTo(o, { pos: o.home.pos.clone(), quat: o.home.quat.clone() }, 0.9, n * 0.05, 0.45);
-      n++;
+      if (this.tweens.some((t) => t.obj === o)) continue;
+      byId.set(o.id!, o);
+      items.push({ id: o.id!, support: !!o.tops?.length, homeY: o.home.pos.y, dist: v3(o.body.translation()).distanceTo(o.home.pos), angle: rot(o).angleTo(o.home.quat) });
     }
-    return n;
+    const order = tidyOrder(items).map((i) => byId.get(i.id)!);
+    this.tidyReadyAt = this.now + TIDY_COOLDOWN;
+    if (!order.length) return 0;
+    for (const o of order) {
+      this.pendingHome.delete(o);
+      // Fly through everything: no collision groups while moving.
+      for (let i = 0; i < o.body.numColliders(); i++) {
+        const c = o.body.collider(i);
+        if (!this.savedGroups.has(c.handle)) this.savedGroups.set(c.handle, c.collisionGroups());
+        c.setCollisionGroups(0);
+      }
+    }
+    order.forEach((o, i) => this.tweenTo(o, { pos: o.home.pos.clone(), quat: o.home.quat.clone() }, 0.75, i * 0.04, this.isHeavy(o) ? 0.1 : 0.3, true));
+    this.tidyBatch = { objs: order, left: order.length, start: this.now };
+    this.w.game.bus.emit('world', { kind: 'tidy', value: order.length });
+    return order.length;
+  }
+
+  /** 'tidying' while things fly home, 'cooldown' right after, else 'idle'. */
+  tidyState(): 'idle' | 'tidying' | 'cooldown' {
+    return this.tidyBatch ? 'tidying' : this.now < this.tidyReadyAt ? 'cooldown' : 'idle';
+  }
+
+  /** Every batch member has arrived: land them all at once, supports first. */
+  private finishTidy(): void {
+    const batch = this.tidyBatch;
+    if (!batch) return;
+    this.tidyBatch = null;
+    const R = this.w.phys.R;
+    const live = batch.objs.filter((o) => this.w.phys.objs.includes(o));
+    for (const o of live) {
+      const b = o.body;
+      // Collide again (groups, not setEnabled: a re-enabled collider misses contacts for a few steps and sinks).
+      for (let i = 0; i < b.numColliders(); i++) {
+        const c = b.collider(i);
+        c.setCollisionGroups(this.savedGroups.get(c.handle) ?? 0xffffffff);
+        this.savedGroups.delete(c.handle);
+      }
+      b.setBodyType(R.RigidBodyType.Dynamic, true);
+      b.setTranslation(o.home.pos, true);
+      b.setRotation(o.home.quat, true);
+      b.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      b.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      o.wasUpright = up(o).y > 0.9;
+      o.handledUntil = this.now + 1.5;
+      this.w.phys.sync(o);
+    }
+    // Loose toys sitting where furniture just landed get lifted on top instead of being blasted away.
+    const boxes = live.map((o) => new THREE.Box3().setFromObject(o.mesh));
+    for (const t of this.w.phys.objs) {
+      if (t.id || t.kind === 'avatar' || !t.body.isDynamic()) continue;
+      const p = v3(t.body.translation());
+      const hit = boxes.find((bx) => bx.containsPoint(p));
+      if (hit) t.body.setTranslation({ x: p.x, y: hit.max.y + 0.15, z: p.z }, true);
+    }
+    // Landed exactly on their resting poses: sleep, so nothing creeps or jumps afterwards.
+    for (const o of live) o.body.sleep();
+    this.tidyReadyAt = this.now + TIDY_COOLDOWN;
   }
 
   /* ------------------------------------------------------------ queries */
@@ -243,7 +323,8 @@ export class Interact {
     // Grabbing by the centre for G keeps things stable; mouse grabs keep the exact point so they swing.
     if (!byMouse) local.set(0, local.y * 0.3, 0);
     const heavy = this.isHeavy(o);
-    this.held = { obj: o, local, heavy, byMouse, damping: o.body.angularDamping() };
+    this.held = { obj: o, local, heavy, byMouse, damping: o.body.angularDamping(), since: this.now };
+    this.pendingHome.delete(o);
     this.holdDist = THREE.MathUtils.clamp(v3(point).distanceTo(this.w.avatar.position), 0.8, 1.4);
     if (!heavy) o.body.setAngularDamping(3);
     o.body.wakeUp();
@@ -256,13 +337,26 @@ export class Interact {
     this.held = null;
     const b = h.obj.body;
     b.setAngularDamping(h.damping);
+    const v0 = b.linvel();
+    const speed = Math.hypot(v0.x, v0.y, v0.z);
     if (throwIt && !h.heavy) {
-      const v = b.linvel();
-      const boost = Math.min(1.5, 8 / Math.max(0.1, Math.hypot(v.x, v.y, v.z)));
-      b.setLinvel({ x: v.x * boost, y: v.y * boost, z: v.z * boost }, true);
+      const boost = Math.min(1.5, 8 / Math.max(0.1, speed)) * comfortTuning(this.w.game.state.settings.comfort).throwBoost;
+      b.setLinvel({ x: v0.x * boost, y: v0.y * boost, z: v0.z * boost }, true);
+      if (speed * boost > 6) this.w.game.bus.emit('world', { kind: 'yeet', object: h.obj.id ?? h.obj.kind, value: speed * boost });
     }
     h.obj.handledUntil = this.now + 1.5;
-    if (h.obj.id) this.pendingHome.set(h.obj, this.now);
+    // Only a deliberate set-down (carried a moment, let go gently) can give it a new home.
+    if (h.obj.id && deliberatePlacement({ heldFor: this.now - h.since, speed, thrown: throwIt, heavy: h.heavy }))
+      this.pendingHome.set(h.obj, { since: this.now, at: v3(b.translation()) });
+  }
+
+  /** Explicit "this is where it lives now" for the held object (or the one in front). */
+  setHomeHere(): PhysObj | null {
+    const o = this.held?.obj ?? this.inFront();
+    if (!o?.id) return null;
+    if (this.held?.obj === o) this.release(false);
+    this.pendingHome.set(o, { since: this.now, at: v3(o.body.translation()) });
+    return o;
   }
 
   private holdTarget(): THREE.Vector3 {
@@ -338,12 +432,12 @@ export class Interact {
     return hit ? from.y + 0.05 - hit.timeOfImpact : 0;
   }
 
-  private tweenTo(o: PhysObj, to: { pos: THREE.Vector3; quat: THREE.Quaternion }, dur: number, delay: number, arc: number): void {
+  private tweenTo(o: PhysObj, to: { pos: THREE.Vector3; quat: THREE.Quaternion }, dur: number, delay: number, arc: number, batch = false): void {
     this.tweens = this.tweens.filter((t) => t.obj !== o);
     const R = this.w.phys.R;
     o.body.setBodyType(R.RigidBodyType.KinematicPositionBased, true);
     o.handledUntil = Infinity;
-    this.tweens.push({ obj: o, fromPos: v3(o.body.translation()), fromQuat: rot(o), toPos: to.pos, toQuat: to.quat, t: 0, dur, delay, arc });
+    this.tweens.push({ obj: o, fromPos: v3(o.body.translation()), fromQuat: rot(o), toPos: to.pos, toQuat: to.quat, t: 0, dur, delay, arc, batch });
   }
 
   private updateTweens(dt: number): void {
@@ -363,6 +457,11 @@ export class Interact {
       b.setNextKinematicRotation(q);
       if (tw.t >= 1) {
         this.tweens.splice(this.tweens.indexOf(tw), 1);
+        if (tw.batch) {
+          // Hold position (kinematic, no collisions) until the whole batch is home.
+          if (this.tidyBatch && --this.tidyBatch.left <= 0) this.finishTidy();
+          continue;
+        }
         b.setBodyType(R.RigidBodyType.Dynamic, true);
         b.setTranslation(tw.toPos, true);
         b.setRotation(tw.toQuat, true);
@@ -386,14 +485,14 @@ export class Interact {
       const p = v3(o.body.translation());
       if (o.kind === 'avatar') {
         if (!inside(p, 0.6)) {
-          o.body.setTranslation({ x: 0.3, y: 1, z: 0.6 }, true);
+          o.body.setTranslation(SPAWN, true);
           o.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
         }
         continue;
       }
       if (inside(p)) continue;
       if (this.held?.obj === o) this.release(false);
-      const to = o.id ? o.home.pos : new THREE.Vector3(0, 1.2, 0);
+      const to = o.id ? o.home.pos : new THREE.Vector3(SPAWN.x, 1.2, SPAWN.z);
       o.body.setTranslation(to, true);
       if (o.id) o.body.setRotation(o.home.quat, true);
       o.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
@@ -402,22 +501,32 @@ export class Interact {
     }
   }
 
-  /** After a deliberate drop, once the object settles upright, that spot becomes its new home. */
+  /** After a deliberate set-down, once the object comes to rest upright near where it was let go, that spot becomes its home. */
   private settleHomes(): void {
-    for (const [o, since] of this.pendingHome) {
-      if (this.now - since > 8 || !this.w.phys.objs.includes(o)) {
+    for (const [o, pend] of this.pendingHome) {
+      if (!this.w.phys.objs.includes(o)) {
         this.pendingHome.delete(o);
         continue;
       }
       const lv = o.body.linvel();
       const av = o.body.angvel();
-      if (Math.hypot(lv.x, lv.y, lv.z) > 0.05 || Math.hypot(av.x, av.y, av.z) > 0.1) continue;
-      this.pendingHome.delete(o);
       const p = v3(o.body.translation());
-      if (up(o).y > 0.9 && inside(p)) {
-        o.home.pos.copy(p);
-        o.home.quat.copy(rot(o));
-      }
+      const verdict = settleVerdict({
+        since: this.now - pend.since,
+        lin: Math.hypot(lv.x, lv.y, lv.z),
+        ang: Math.hypot(av.x, av.y, av.z),
+        upright: up(o).y > 0.9,
+        inside: inside(p, 0),
+        drift: p.distanceTo(pend.at),
+        interrupted: this.held?.obj === o || this.tweens.some((t) => t.obj === o),
+      });
+      if (verdict === 'wait') continue;
+      this.pendingHome.delete(o);
+      if (verdict === 'reject') continue;
+      const moved = p.distanceTo(o.home.pos);
+      o.home.pos.copy(p);
+      o.home.quat.copy(rot(o));
+      this.onPlaced(o, moved);
     }
   }
 
@@ -442,6 +551,11 @@ export class Interact {
     this.now += dt;
     this.updateHeld(dt);
     this.updateTweens(dt);
+    // Safety net: a batch that somehow lost a member still lands.
+    if (this.tidyBatch && this.now - this.tidyBatch.start > 5) {
+      this.tweens = this.tweens.filter((t) => !t.batch);
+      this.finishTidy();
+    }
     this.rescue();
     this.settleHomes();
     this.saveAcc += dt;
@@ -475,9 +589,7 @@ function up(o: PhysObj): THREE.Vector3 {
   return new THREE.Vector3(0, 1, 0).applyQuaternion(rot(o));
 }
 
-function quatAngle(a: THREE.Quaternion, b: THREE.Quaternion): number {
-  return a.angleTo(b);
-}
+const validPose = (a: unknown): boolean => Array.isArray(a) && a.every((n) => typeof n === 'number' && Number.isFinite(n));
 
 /** Inside the bedroom or the garage (with a margin), above the floor and below the ceiling. */
 export function inside(p: THREE.Vector3Like, margin = 0.35): boolean {

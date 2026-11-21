@@ -4,8 +4,8 @@ import { keepAlpha, type Graphics } from './render';
 import { mat, ROOM, WINDOW, type RoomRefs } from './room';
 import { rand, softDot } from './textures';
 
-const SUN_POS = new THREE.Vector3(7, 4.6, 0.2);
-const SUN_TARGET = new THREE.Vector3(-0.6, 0.2, 0.75);
+const SUN_POS = new THREE.Vector3(7.6, 4.6, -1.4);
+const SUN_TARGET = new THREE.Vector3(0, 0.2, -0.85);
 const MAX_DUST = 320;
 
 const BEAM_VERT = /* glsl */ `
@@ -125,16 +125,17 @@ export class Lighting {
     const nub = new THREE.Mesh(new THREE.SphereGeometry(0.016, 12, 8), mat('#b9a27a', 0.3, 0.9));
     nub.position.y = -0.12;
     fixture.add(nub);
-    fixture.position.set(0, h, 0);
+    fixture.position.set(ROOM.cx, h, ROOM.cz);
+    fixture.name = 'ceiling-lamp';
     scene.add(fixture);
-    this.lamp.position.set(0, h - 0.17, 0);
+    this.lamp.position.set(ROOM.cx, h - 0.17, ROOM.cz);
     this.lamp.shadow.bias = -0.002;
     this.lamp.shadow.normalBias = 0.02;
     this.lamp.shadow.camera.near = 0.12;
     scene.add(this.lamp);
 
     // Bounce: the sunlit floor patch lights the room a little.
-    this.bounce.position.set(0.8, 0.35, 0.7);
+    this.bounce.position.set(1.4, 0.35, -0.85);
     scene.add(this.bounce);
 
     // Screen glow (follows the monitor).
@@ -203,12 +204,12 @@ export class Lighting {
     cam.lookAt(SUN_TARGET);
     cam.updateMatrixWorld(true);
     const inv = cam.matrixWorldInverse;
-    const { hx, hz, h } = ROOM;
+    const { x0, x1, z0, z1, h } = ROOM;
     const box = new THREE.Box3();
     const p = new THREE.Vector3();
-    for (const x of [-hx, hx + WINDOW.depth])
+    for (const x of [x0, x1 + WINDOW.depth])
       for (const y of [0, h])
-        for (const z of [-hz, hz]) box.expandByPoint(p.set(x, y, z).applyMatrix4(inv));
+        for (const z of [z0, z1]) box.expandByPoint(p.set(x, y, z).applyMatrix4(inv));
     cam.left = box.min.x - 0.05;
     cam.right = box.max.x + 0.05;
     cam.bottom = box.min.y - 0.05;
@@ -225,7 +226,7 @@ export class Lighting {
   /** A prism extruded from the window opening along the sun direction (4 soft sides). */
   private beamGeometry(): THREE.BufferGeometry {
     const d = this.sunDir();
-    const x = ROOM.hx + 0.02;
+    const x = ROOM.x1 + 0.02;
     const y0 = WINDOW.y - WINDOW.h / 2 + 0.05;
     const y1 = WINDOW.y + WINDOW.h / 2 - 0.05;
     const z0 = WINDOW.z - WINDOW.w / 2 + 0.05;
@@ -270,7 +271,7 @@ export class Lighting {
     const L = (WINDOW.y + WINDOW.h / 2) / -d.y;
     for (let i = 0; i < MAX_DUST; i++) {
       const t = 0.05 + r() * 0.75;
-      const p = new THREE.Vector3(ROOM.hx, WINDOW.y + (r() - 0.5) * WINDOW.h * 0.9, WINDOW.z + (r() - 0.5) * WINDOW.w * 0.9).addScaledVector(d, t * L);
+      const p = new THREE.Vector3(ROOM.x1, WINDOW.y + (r() - 0.5) * WINDOW.h * 0.9, WINDOW.z + (r() - 0.5) * WINDOW.w * 0.9).addScaledVector(d, t * L);
       pos.set([p.x, Math.max(0.05, p.y), p.z], i * 3);
       seed[i] = r();
     }

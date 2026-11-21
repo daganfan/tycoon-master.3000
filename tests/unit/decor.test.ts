@@ -8,7 +8,8 @@ import { GEAR_RECIPES } from '@/world/decor/gear';
 import { buildModel, recipeFor } from '@/world/decor/factory';
 import { createProp, isKnownProp } from '@/world/props';
 import { initRapier, Physics } from '@/world/physics';
-import { ROOM } from '@/world/room';
+import { FURNITURE_HOME, ROOM, WALL_SHELVES } from '@/world/room';
+import { DESK } from '@/world/furniture';
 import { Game } from '@/sim/game';
 import { createInitialState } from '@/sim/state';
 import { num } from '@/core/num';
@@ -108,45 +109,67 @@ describe('recipes and props', () => {
   });
 });
 
+/** Physics-only stand-in for the bedroom: floor, walls, ceiling, a wall shelf and the 2 m desk with risers. */
+export function standInRoom(phys: Physics): void {
+  const { x0, x1, z0, z1, hx, hz, cx, cz, h } = ROOM;
+  phys.staticBox({ x: hx + 1, y: 0.1, z: hz + 1 }, { x: cx, y: -0.1, z: cz });
+  phys.staticBox({ x: hx, y: h, z: 0.1 }, { x: cx, y: h / 2, z: z0 - 0.1 });
+  phys.staticBox({ x: hx, y: h, z: 0.1 }, { x: cx, y: h / 2, z: z1 + 0.1 });
+  phys.staticBox({ x: 0.1, y: h, z: hz }, { x: x0 - 0.1, y: h / 2, z: cz });
+  phys.staticBox({ x: 0.1, y: h, z: hz }, { x: x1 + 0.1, y: h / 2, z: cz });
+  phys.staticBox({ x: hx, y: 0.1, z: hz }, { x: cx, y: h + 0.1, z: cz });
+  for (const s of WALL_SHELVES) phys.staticBox({ x: s.w / 2, y: 0.015, z: s.d / 2 }, { x: s.x, y: s.y, z: s.z }, 0.9, new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), s.yaw));
+  const d = FURNITURE_HOME.desk;
+  const desk = phys.createBody({ pos: { x: d.x, y: 0, z: d.z }, fixed: true });
+  phys.addCollider(desk, phys.R.ColliderDesc.cuboid(DESK.w / 2, 0.0225, DESK.d / 2).setTranslation(0, DESK.top, 0), {});
+  for (const sx of [-1, 1])
+    phys.addCollider(desk, phys.R.ColliderDesc.cuboid(DESK.riserW / 2, DESK.riserH / 2, DESK.riserD / 2).setTranslation(sx * DESK.riserX, DESK.top + 0.0225 + DESK.riserH / 2, -DESK.d / 2 + DESK.riserD / 2 + 0.02), {});
+  const o = phys.track(new THREE.Group(), desk, 'desk', 'desk', { restitution: 0, friction: 0.9, density: 200 });
+  o.tops = [
+    { kind: 'desk', x: 0, y: DESK.top + 0.0225, z: 0, hw: DESK.w / 2 - 0.02, hd: DESK.d / 2 - 0.02, clear: 0.9 },
+    ...[-1, 1].map((sx) => ({ kind: 'riser' as const, x: sx * DESK.riserX, y: DESK.top + 0.0225 + DESK.riserH, z: -DESK.d / 2 + DESK.riserD / 2 + 0.02, hw: DESK.riserW / 2 - 0.01, hd: DESK.riserD / 2 - 0.01, clear: 1 })),
+  ];
+}
+
 describe('recipe props in physics', () => {
   let phys: Physics;
   beforeAll(async () => {
     const R = await initRapier();
     phys = new Physics(R);
-    const { hx, hz, h } = ROOM;
-    phys.staticBox({ x: hx + 1, y: 0.1, z: hz + 1 }, { x: 0, y: -0.1, z: 0 });
-    phys.staticBox({ x: hx, y: h, z: 0.1 }, { x: 0, y: h / 2, z: -hz - 0.1 });
-    phys.staticBox({ x: hx, y: h, z: 0.1 }, { x: 0, y: h / 2, z: hz + 0.1 });
-    phys.staticBox({ x: 0.1, y: h, z: hz }, { x: -hx - 0.1, y: h / 2, z: 0 });
-    phys.staticBox({ x: 0.1, y: h, z: hz }, { x: hx + 0.1, y: h / 2, z: 0 });
-    phys.staticBox({ x: hx, y: 0.1, z: hz }, { x: 0, y: h + 0.1, z: 0 });
-    phys.staticBox({ x: 0.45, y: 0.015, z: 0.11 }, { x: 1.2, y: 1.5, z: -hz + 0.11 });
-    // Stand-in desk so desk spots resolve.
-    const desk = phys.createBody({ pos: { x: 0, y: 0, z: -hz + 0.42 }, fixed: true });
-    phys.addCollider(desk, phys.R.ColliderDesc.cuboid(0.8, 0.0225, 0.36).setTranslation(0, 0.76, 0), {});
-    phys.track(new THREE.Group(), desk, 'desk', 'desk', { restitution: 0, friction: 0.9, density: 200 });
+    standInRoom(phys);
   });
 
-  it('spawns every decor + gear item without exploding', () => {
+  it('spawns every decor + gear item on a free spot without exploding or falling', () => {
     const scene = new THREE.Scene();
     const props = [...DECOR_ITEMS.map((i) => i.prop!), ...Object.keys(GEAR_RECIPES)];
     const objs = props.map((p) => {
       expect(recipeFor(p), p).toBeDefined();
-      const r = createProp(p, 0, scene, phys, 0.76);
+      const r = createProp(p, 0, scene, phys, DESK.top);
       expect(r.obj, p).toBeDefined();
       return { p, o: r.obj! };
     });
-    for (let i = 0; i < 180; i++) phys.world.step();
-    const { hx, hz, h } = ROOM;
-    for (const { p, o } of objs) {
+    // Nothing spawns inside anything else: let it settle a moment, then nothing should keep moving.
+    for (let i = 0; i < 30; i++) phys.world.step();
+    const settled = objs.map(({ o }) => ({ ...o.body.translation() }));
+    for (let i = 0; i < 240; i++) phys.world.step();
+    const { x0, x1, z0, z1, h } = ROOM;
+    const floaty = new Set(['decor:heart_balloon', 'decor:pool_flamingo']);
+    let drifted = 0;
+    objs.forEach(({ p, o }, i) => {
       const t = o.body.translation();
       const v = o.body.linvel();
       expect(Number.isFinite(t.x + t.y + t.z), p).toBe(true);
-      expect(Math.abs(t.x), p).toBeLessThan(hx + 0.05);
-      expect(Math.abs(t.z), p).toBeLessThan(hz + 0.05);
+      expect(t.x, p).toBeGreaterThan(x0 - 0.05);
+      expect(t.x, p).toBeLessThan(x1 + 0.05);
+      expect(t.z, p).toBeGreaterThan(z0 - 0.05);
+      expect(t.z, p).toBeLessThan(z1 + 0.05);
       expect(t.y, p).toBeGreaterThan(-0.1);
       expect(t.y, p).toBeLessThan(h + 0.05);
-      if (p !== 'decor:heart_balloon' && p !== 'decor:pool_flamingo') expect(Math.hypot(v.x, v.y, v.z), p).toBeLessThan(2);
-    }
+      if (floaty.has(p)) return;
+      expect(Math.hypot(v.x, v.y, v.z), p).toBeLessThan(0.5);
+      const s = settled[i]!;
+      if (Math.hypot(t.x - s.x, t.y - s.y, t.z - s.z) > 0.1) drifted++;
+    });
+    expect(drifted).toBeLessThanOrEqual(2);
   });
 });
