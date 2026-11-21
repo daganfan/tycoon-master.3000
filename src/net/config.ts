@@ -30,7 +30,7 @@ export const MAX_NAME = 16;
 
 /** Seconds of silence before a guest is dropped / a guest thinks the host is gone. */
 export const GUEST_TIMEOUT = 15;
-export const HOST_SILENCE = 8;
+export const HOST_SILENCE = 15;
 /** Seconds a guest waits for the host before giving up on joining. */
 export const JOIN_TIMEOUT = 45;
 

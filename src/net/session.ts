@@ -466,6 +466,7 @@ class GuestSession extends Session {
   private screens: GuestScreens;
   private hostId: string;
   private lastHost = now();
+  private lastFrame = now();
   private acc = { pose: 0, hello: 0 };
   private focus = -1;
   private moveBucket = new TokenBucket(25, 30, performance.now());
@@ -649,7 +650,12 @@ class GuestSession extends Session {
       this.acc.pose = 0;
       this.send({ t: 'pose', ...avatarPose(w.avatar, this.currentEmote()) });
     }
-    if (netInfo.mode === 'guest' && now() - this.lastHost > HOST_SILENCE) this.lost();
+    // If this tab itself froze (shader compile, GC, slow machine), queued host messages
+    // haven't been processed yet — don't blame the host for our own stall.
+    const t = now();
+    if (t - this.lastFrame > 1) this.lastHost = Math.max(this.lastHost, t - 1);
+    this.lastFrame = t;
+    if (netInfo.mode === 'guest' && t - this.lastHost > HOST_SILENCE) this.lost();
     // Knock again every few (real) seconds until the host answers with a fresh welcome.
     if (netInfo.mode === 'lost' && now() - this.acc.hello > 3) {
       this.acc.hello = now();

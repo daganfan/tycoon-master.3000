@@ -39,7 +39,7 @@ test('host a room, a friend joins by code, sees the room, items and chat sync', 
   await a.addInitScript(() =>
     localStorage.setItem('tm3000.profile', JSON.stringify({ name: 'Alice', color: '#e94b4b' })),
   );
-  await a.goto('/?fresh&net=local');
+  await a.goto('/?fresh&net=local&gfx=low');
   await tm(a);
 
   // A buys a box first, so the snapshot has something beyond the starter room.
@@ -60,9 +60,9 @@ test('host a room, a friend joins by code, sees the room, items and chat sync', 
   await b.addInitScript(() =>
     localStorage.setItem('tm3000.profile', JSON.stringify({ name: 'Bob', color: '#3498db' })),
   );
-  await b.goto(`/?join=${code}&net=local`);
+  await b.goto(`/?join=${code}&net=local&gfx=low`);
   await tm(b);
-  await expect(b.getByTestId('visit-banner')).toContainText('Alice');
+  await expect(b.getByTestId('visit-banner')).toContainText('Alice', { timeout: 30_000 });
   expect((await debug(b)).mode).toBe('guest');
 
   // B sees A's room: same items and the same set of physical props.
@@ -74,7 +74,7 @@ test('host a room, a friend joins by code, sees the room, items and chat sync', 
   // B's avatar shows up at A's place (and A's at B's).
   await expect.poll(async () => (await debug(a)).avatars, { timeout: 15_000 }).toContain('Bob');
   await expect.poll(async () => (await debug(b)).avatars, { timeout: 15_000 }).toContain('Alice');
-  await expect(a.getByTestId('mp-players')).toContainText('Bob');
+  await expect(a.getByTestId('mp-players')).toContainText('Bob', { timeout: 30_000 });
 
   // A buys an item: it appears in B's copy of the room.
   await a.evaluate(() => {

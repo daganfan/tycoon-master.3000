@@ -12,7 +12,7 @@ type TM = {
 test('boots, plays Lemon Mogul, cashes out and collects coins', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto('/?fresh');
+  await page.goto('/?fresh&gfx=low');
   await page.waitForFunction(() => !!(window as unknown as { __tm?: TM }).__tm, null, { timeout: 60_000 });
   await expect(page.getByTestId('hud-cash')).toBeVisible();
   await expect(page.getByTestId('quest')).toContainText('Rent due');
