@@ -4,12 +4,15 @@ import { FixedLoop } from '@/core/loop';
 import { formatCash } from '@/core/num';
 import { Game } from '@/sim/game';
 import { createInitialState } from '@/sim/state';
-import { IdbStore, MemoryStore, exportSave, importSave, readSave, writeSave, type SaveStore } from '@/sim/save';
+import { IdbStore, MemoryStore, deserialize, exportSave, importSave, readSave, writeSave, type SaveStore } from '@/sim/save';
 import type { OsHost } from '@/os/os';
 import App from '@/ui/App.svelte';
 import { ui } from '@/ui/store.svelte';
 import { hasWebGL2, showFatal } from './bootGuard';
 import { registerPwa } from './pwa';
+// Multiplayer: `?join=CODE` visits a friend's room instead of loading your own save.
+import { joinCodeFrom } from '@/net/protocol';
+import type { GuestLink } from '@/net/session';
 
 const AUTOSAVE_SECONDS = 30;
 
@@ -20,20 +23,32 @@ function formatDuration(s: number): string {
 }
 
 async function boot(): Promise<void> {
+  // Visiting someone: connect first; their room snapshot replaces our save (which stays untouched).
+  const joinCode = joinCodeFrom(location.search);
+  let guest: GuestLink | null = null;
+  if (joinCode) {
+    const { joinWithOverlay } = await import('@/net/joinScreen');
+    try {
+      guest = await joinWithOverlay(joinCode);
+    } catch {
+      return; // the overlay explains what went wrong
+    }
+  }
   let store: SaveStore;
   try {
+    if (guest) throw new Error('visitor: never touch the real save');
     store = new IdbStore();
     await store.get('main');
   } catch {
     store = new MemoryStore();
   }
   const fresh = new URLSearchParams(location.search).has('fresh');
-  const saved = fresh ? undefined : await readSave(store);
-  const game = new Game(saved ?? createInitialState());
+  const saved = fresh || guest ? undefined : await readSave(store);
+  const game = new Game(guest ? deserialize(guest.welcome.state) : (saved ?? createInitialState()));
 
   let saving = false;
   const save = async () => {
-    if (saving) return;
+    if (saving || guest) return;
     saving = true;
     try {
       await writeSave(store, game.state);
@@ -86,10 +101,14 @@ async function boot(): Promise<void> {
   ui.unfocus = () => world.setFocus(null);
   ui.tidy = () => world.tidyAll();
   ui.loading = '';
+  const net = await import('@/net/session');
+  if (guest) net.attachGuest(guest, game, world);
+  else net.registerHome(game, world);
 
   const loop = new FixedLoop(
     0.1,
-    (dt) => game.tick(dt),
+    // A visitor's copy of the host's game never ticks: the host simulates, we mirror.
+    (dt) => !guest && game.tick(dt),
     (_a, frameDt) => {
       world.update(frameDt);
       ui.hint = world.hint;
@@ -102,7 +121,7 @@ async function boot(): Promise<void> {
   window.addEventListener('beforeunload', () => void save());
 
   // Debug / test handle
-  (window as unknown as { __tm: unknown }).__tm = { game, world, save };
+  (window as unknown as { __tm: unknown }).__tm = { game, world, save, net };
 }
 
 void registerPwa(async () => (window as unknown as { __tm?: { save(): Promise<void> } }).__tm?.save());

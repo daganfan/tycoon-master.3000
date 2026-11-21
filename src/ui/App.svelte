@@ -3,6 +3,7 @@
   import type { Game } from '@/sim/game';
   import { formatCash, formatNum } from '@/core/num';
   import SkillTree from './SkillTree.svelte';
+  import Multiplayer from './Multiplayer.svelte';
   import { ui } from './store.svelte';
 
   let { game, onReset }: { game: Game; onReset: () => void } = $props();
@@ -48,6 +49,7 @@
     };
   });
 
+  let mpOpen = $state(false);
   let importText = $state('');
   let copied = $state(false);
 </script>
@@ -90,7 +92,10 @@
       <button onclick={() => ui.focusMain?.()} data-testid="use-pc">🖥️ Use PC <kbd>E</kbd></button>
       <button onclick={() => ui.tidy?.()} data-testid="tidy" title="Put all furniture and props back in place">🧹 Tidy up</button>
     {/if}
+    <button onclick={() => (mpOpen = !mpOpen)} data-testid="mp-button" title="Play with friends">👥 Multiplayer</button>
   </div>
+
+  <Multiplayer bind:open={mpOpen} />
 
   <div class="toasts">
     {#each toasts as t (t.id)}
