@@ -65,6 +65,8 @@ export const ITEMS: ItemDef[] = [
     baseCost: 25000, growth: 8, max: 2, mods: [{ stat: 'cosmetic.slots', op: 'add', value: 1 }], prop: 'rail', phase: 'bedroom' },
   { id: 'power_strip', name: 'Daisy-Chained Power Strip', desc: '+1 game slot. Fire hazard (cosmetic).', icon: '🔌', category: 'hardware',
     baseCost: 250000, growth: 1, max: 1, mods: [{ stat: 'slots', op: 'add', value: 1 }], prop: 'powerstrip', phase: 'bedroom' },
+  { id: 'window_guy', name: 'Window Guy (call-out)', desc: 'Fixes a broken window. Asks no questions. Only shows up when something is broken.', icon: '🪟', category: 'utility',
+    baseCost: 150, growth: 1, max: 1, mods: [], phase: 'bedroom', needsFlag: 'window:broken' },
   { id: 'garage_key', name: 'Garage Key', desc: 'Unlocks the Garage: a physical scrap factory, new games and more room.', icon: '🔑', category: 'key',
     baseCost: 2000000, growth: 1, max: 1, mods: [], phase: 'bedroom' },
   ...GARAGE_ITEMS,

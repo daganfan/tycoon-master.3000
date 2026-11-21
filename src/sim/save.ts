@@ -5,6 +5,9 @@ import { createGarageState } from './garage/factory';
 
 type RawSave = Record<string, unknown> & { version: number };
 
+/** z of the bedroom's front wall (the garage starts behind it); kept here so the sim stays free of world code. */
+const BEDROOM_FRONT_Z = 2.5;
+
 /** Ordered migrations: index i upgrades version i+1 → i+2. */
 const MIGRATIONS: ((s: RawSave) => RawSave)[] = [
   // v1 → v2: prop layout persistence; old per-kind chaos cooldowns are dropped (chaos meter replaces them).
@@ -19,6 +22,18 @@ const MIGRATIONS: ((s: RawSave) => RawSave)[] = [
     const items = (s.items as Record<string, number> | undefined) ?? {};
     if ((items.garage_key ?? 0) > 0 && !flags.includes('phase:garage')) flags.push('phase:garage');
     return { ...s, flags, garage: createGarageState(), version: 3 };
+  },
+  // v3 → v4: the bedroom grew (8 m × 6.5 m) and got new furniture; achievements.
+  // Saved bedroom poses belong to the old room, so they are dropped and every prop
+  // respawns on a free spot. Garage props (behind the front wall) keep their places.
+  (s) => {
+    const layout = (s.layout as Record<string, { p?: unknown }> | undefined) ?? {};
+    const kept: Record<string, unknown> = {};
+    for (const [id, pose] of Object.entries(layout)) {
+      const p = pose?.p;
+      if (Array.isArray(p) && typeof p[2] === 'number' && p[2] > BEDROOM_FRONT_Z + 0.1) kept[id] = pose;
+    }
+    return { ...s, layout: kept, achievements: [], version: 4 };
   },
 ];
 
@@ -49,6 +64,7 @@ export function deserialize(text: string): GameState {
   s.tokens = { ...base.tokens, ...s.tokens };
   s.settings = { ...base.settings, ...s.settings };
   s.layout = s.layout ?? {};
+  s.achievements = Array.isArray(s.achievements) ? s.achievements.filter((a) => typeof a === 'string') : [];
   s.garage = { ...createGarageState(), ...s.garage, pads: [...(s.garage?.pads ?? [])] };
   s.cosmetics = { owned: s.cosmetics?.owned ?? [], equipped: s.cosmetics?.equipped ?? {} };
   return s;

@@ -3,6 +3,7 @@ import type { Physics, PhysObj } from './physics';
 import { buildMonitor, mat, rbox, shadowed, ROOM } from './room';
 import { fabric, posterTex } from './textures';
 import { createRecipeProp, hasRecipe } from './decor/factory';
+import { hashId, placeInWorld } from './placement';
 
 export interface PropResult {
   obj?: PhysObj;
@@ -11,35 +12,45 @@ export interface PropResult {
   light?: THREE.PointLight;
 }
 
-const { hx, hz } = ROOM;
+const { x0, x1, z0, z1 } = ROOM;
 
-/** Where each unit of an item appears. Index = how many were owned before. */
-const SLOTS: Record<string, THREE.Vector3[]> = {
-  monitor: [new THREE.Vector3(0.45, 0, -hz + 0.45), new THREE.Vector3(-0.6, 0, -hz + 0.45), new THREE.Vector3(0.62, 0.0, -hz + 0.62)],
-  keyboard: [new THREE.Vector3(-0.1, 0, -hz + 0.65), new THREE.Vector3(0.4, 0, -hz + 0.7), new THREE.Vector3(-0.55, 0, -hz + 0.7)],
-  pc: [new THREE.Vector3(hx - 0.45, 0, -1.2), new THREE.Vector3(hx - 0.45, 0, -0.3), new THREE.Vector3(hx - 0.45, 0, 1.7)],
-  fan: [new THREE.Vector3(-0.68, 0, -hz + 0.62), new THREE.Vector3(-2.3, 0, -hz + 0.5), new THREE.Vector3(2.2, 0, 1.9)],
-  lamp: [new THREE.Vector3(0.7, 0, -hz + 0.35), new THREE.Vector3(-2.6, 0, -0.5), new THREE.Vector3(1.4, 1.52, -hz + 0.12), new THREE.Vector3(2.6, 0, 2.2)],
-  poster: [new THREE.Vector3(0.0, 1.75, -hz + 0.005), new THREE.Vector3(-hx + 0.005, 1.7, -1.4), new THREE.Vector3(hx - 0.005, 1.7, 2.0), new THREE.Vector3(-0.4, 1.75, hz - 0.005)],
-  plant: [new THREE.Vector3(-2.6, 0, -2.1), new THREE.Vector3(2.6, 0, -2.1), new THREE.Vector3(0.6, 0, 2.2)],
-  beanbag: [new THREE.Vector3(-1.4, 0, 1.8), new THREE.Vector3(0.0, 0, 1.9)],
-  box: [0, 1, 2, 3, 4, 5].map((i) => new THREE.Vector3(-1.9 + (i % 2) * 0.05, 0.25 + i * 0.42, -1.7 + (i % 3) * 0.03)),
-  piggy: [new THREE.Vector3(1.25, 1.53, -hz + 0.12)],
+/** Footprint (x, height, z) and preferred surface of each built-in prop; the placement solver finds the actual spot. */
+const PROPS: Record<string, { hint: string; size: [number, number, number] }> = {
+  monitor: { hint: 'monitor', size: [0.47, 0.5, 0.2] },
+  keyboard: { hint: 'keyboard', size: [0.46, 0.05, 0.16] },
+  pc: { hint: 'floor', size: [0.66, 1.1, 0.96] },
+  fan: { hint: 'desk', size: [0.24, 0.42, 0.22] },
+  lamp: { hint: 'desk', size: [0.16, 0.37, 0.16] },
+  plant: { hint: 'floor', size: [0.44, 0.9, 0.44] },
+  beanbag: { hint: 'floor', size: [0.86, 0.56, 0.86] },
+  box: { hint: 'floor', size: [0.42, 0.42, 0.42] },
+  piggy: { hint: 'shelf', size: [0.3, 0.2, 0.2] },
+  poster: { hint: 'wall', size: [0.45, 0.63, 0.01] },
 };
 
-export function propSlot(prop: string, index: number): THREE.Vector3 {
-  const arr = SLOTS[prop];
-  const base = arr?.[Math.min(index, (arr?.length ?? 1) - 1)] ?? new THREE.Vector3(0, 0.5, 0);
-  return base.clone().add(new THREE.Vector3(0, 0, 0.001 * index));
+/** Posters hang on fixed wall spots: [x, y, z, rotY]. */
+const POSTER_SLOTS: [number, number, number, number][] = [
+  [-1.25, 1.75, z0 + 0.005, 0],
+  [x0 + 0.005, 1.75, -1.9, Math.PI / 2],
+  [x1 - 0.005, 1.75, 1.6, -Math.PI / 2],
+  [-2.9, 1.75, z1 - 0.005, Math.PI],
+];
+
+/** Where the solver puts a built-in prop (bottom-centre position + yaw). */
+export function propSpot(phys: Physics, prop: string, index: number): { pos: THREE.Vector3; yaw: number } {
+  const p = PROPS[prop];
+  if (!p) return { pos: new THREE.Vector3(ROOM.cx, 0.5, ROOM.cz), yaw: 0 };
+  const s = placeInWorld(phys, p.hint, new THREE.Vector3(...p.size), hashId(`${prop}#${index}`));
+  return { pos: s.pos, yaw: s.yaw };
 }
 
 const POSTERS: [string, string, string][] = [['HUSTLE', '#e63946', '#f1faee'], ['STONKS', '#2a9d8f', '#ffffff'], ['NO\nSLEEP', '#111', '#ffcc00'], ['VIBES', '#7b2cbf', '#fff']];
 
-/** Every fixed slot position, so recipe props (decor, gear) avoid spawning on top of them. */
-export const reservedSpots = (): THREE.Vector3[] => Object.values(SLOTS).flat();
+/** Fixed poster spots, so recipe wall decor avoids them. */
+export const reservedSpots = (): THREE.Vector3[] => POSTER_SLOTS.map(([x, y, z]) => new THREE.Vector3(x, y, z));
 
 /** True when createProp knows how to build `prop`. */
-export const isKnownProp = (prop: string): boolean => prop in SLOTS || hasRecipe(prop);
+export const isKnownProp = (prop: string): boolean => prop in PROPS || hasRecipe(prop);
 
 export function createProp(prop: string, index: number, scene: THREE.Scene, phys: Physics, deskY: number): PropResult {
   // Data-driven props: Junk Mart decor (`decor:<id>`) and newer eBuy gear.
@@ -48,16 +59,30 @@ export function createProp(prop: string, index: number, scene: THREE.Scene, phys
     return r ? { obj: r.obj, light: r.light } : {};
   }
   const R = phys.R;
-  const at = propSlot(prop, index);
-  const body = (pos: THREE.Vector3Like, rotY = 0) => phys.createBody({ pos, rot: new THREE.Euler(0, rotY, 0), angularDamping: 0.6 });
+  if (prop === 'poster') {
+    const [x, y, z, ry] = POSTER_SLOTS[index % POSTER_SLOTS.length]!;
+    const [t, bg, fg] = POSTERS[index % POSTERS.length]!;
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(0.45, 0.63), mat('#fff', 0.75, 0, { map: posterTex(t, bg, fg) }));
+    m.position.set(x, y, z);
+    m.rotation.set(0, ry, (index % 2 ? 1 : -1) * 0.03, 'YXZ');
+    scene.add(m);
+    return {};
+  }
+  if (!PROPS[prop]) return {};
+  const spot = propSpot(phys, prop, index);
+  const at = spot.pos;
+  const yaw = spot.yaw;
+  // Sturdy defaults: grippy, barely bouncy, damped; small things get CCD so they never tunnel.
+  const body = (pos: THREE.Vector3Like, rotY = yaw, ccd = false) => phys.createBody({ pos, rot: new THREE.Euler(0, rotY, 0), angularDamping: 1, linearDamping: 0.3, ccd });
   switch (prop) {
     case 'monitor': {
       const m = buildMonitor(0.42, 0.26, false);
       scene.add(m.group);
-      const b = body({ x: at.x, y: deskY + 0.03, z: at.z }, index === 1 ? 0.25 : -0.25);
-      phys.addCollider(b, R.ColliderDesc.cuboid(0.12, 0.01, 0.1).setTranslation(0, 0.01, -0.04), { density: 2500 });
-      phys.addCollider(b, R.ColliderDesc.cuboid(m.half.x, 0.15, 0.03).setTranslation(0, 0.16 + 0.13, 0), { density: 300 });
-      const obj = phys.track(m.group, b, 'monitor', 'pc', { restitution: 0.1, friction: 0.8, density: 300 });
+      const b = body({ x: at.x, y: at.y + 0.004, z: at.z });
+      // Wide, heavy foot + light panel: low centre of mass, hard to tip.
+      phys.addCollider(b, R.ColliderDesc.cuboid(0.13, 0.01, 0.1).setTranslation(0, 0.01, -0.04), { density: 3200, friction: 1, restitution: 0.05 });
+      phys.addCollider(b, R.ColliderDesc.cuboid(m.half.x, 0.15, 0.03).setTranslation(0, 0.16 + 0.13, 0), { density: 180, friction: 0.8, restitution: 0.05 });
+      const obj = phys.track(m.group, b, 'monitor', 'pc', { restitution: 0.05, friction: 0.8, density: 180 });
       return { obj, screen: { mesh: m.screen, obj, w: 0.42, h: 0.26 } };
     }
     case 'keyboard': {
@@ -71,12 +96,12 @@ export function createProp(prop: string, index: number, scene: THREE.Scene, phys
           g.add(key);
         }
       scene.add(shadowed(g));
-      const b = body({ x: at.x, y: deskY + 0.05, z: at.z });
-      phys.addCollider(b, R.ColliderDesc.cuboid(0.22, 0.015, 0.07), { density: 900 });
-      return { obj: phys.track(g, b, 'keyboard', 'props', { restitution: 0.2, friction: 0.7, density: 900 }) };
+      const b = body({ x: at.x, y: at.y + 0.019, z: at.z }, yaw, true);
+      phys.addCollider(b, R.ColliderDesc.cuboid(0.22, 0.015, 0.07), { density: 900, friction: 0.9, restitution: 0.05 });
+      return { obj: phys.track(g, b, 'keyboard', 'props', { restitution: 0.05, friction: 0.9, density: 900 }) };
     }
     case 'pc': {
-      // Side table + flat monitor + tower, running its own OS.
+      // Side table + flat monitor, running its own OS. The monitor faces the middle of the room.
       const table = new THREE.Group();
       const top = rbox(0.6, 0.04, 0.9, 0.01, mat('#ece6d8', 0.45));
       top.position.y = 0.72;
@@ -87,17 +112,23 @@ export function createProp(prop: string, index: number, scene: THREE.Scene, phys
         table.add(leg);
       }
       scene.add(shadowed(table));
-      const tb = body({ x: at.x, y: 0, z: at.z });
-      phys.addCollider(tb, R.ColliderDesc.cuboid(0.3, 0.02, 0.45).setTranslation(0, 0.72, 0), { density: 250 });
+      // The solver picked the long side along z (yaw 0) or along x (yaw 90°); the monitor faces the room across it.
+      const along = Math.abs(Math.sin(yaw)) > 0.5;
+      const tableYaw = along ? Math.PI / 2 : 0;
+      const monYaw = along ? (ROOM.cz > at.z ? 0 : Math.PI) : ROOM.cx > at.x ? Math.PI / 2 : -Math.PI / 2;
+      const tb = body({ x: at.x, y: at.y + 0.003, z: at.z }, tableYaw);
+      phys.addCollider(tb, R.ColliderDesc.cuboid(0.3, 0.02, 0.45).setTranslation(0, 0.72, 0), { density: 250, friction: 0.9, restitution: 0.04 });
       for (const [x, z] of [[-0.27, -0.42], [0.27, -0.42], [-0.27, 0.42], [0.27, 0.42]] as const)
-        phys.addCollider(tb, R.ColliderDesc.cuboid(0.02, 0.36, 0.02).setTranslation(x, 0.36, z), { density: 600 });
-      phys.track(table, tb, 'table', 'desk', { restitution: 0.05, friction: 0.9, density: 250 });
+        phys.addCollider(tb, R.ColliderDesc.cuboid(0.02, 0.35, 0.02).setTranslation(x, 0.35, z), { density: 2500, friction: 1, restitution: 0.04 });
+      const tObj = phys.track(table, tb, 'table', 'desk', { restitution: 0.04, friction: 0.9, density: 250 });
+      tObj.heavy = true;
+      tObj.tops = [{ kind: 'table', x: 0, y: 0.74, z: 0, hw: 0.28, hd: 0.43, clear: 0.9 }];
       const m = buildMonitor(0.46, 0.29, false);
       scene.add(m.group);
-      const mb = body({ x: at.x, y: 0.75, z: at.z }, -Math.PI / 2);
-      phys.addCollider(mb, R.ColliderDesc.cuboid(0.12, 0.01, 0.1).setTranslation(0, 0.01, -0.04), { density: 2500 });
-      phys.addCollider(mb, R.ColliderDesc.cuboid(m.half.x, 0.16, 0.03).setTranslation(0, 0.16 + 0.145, 0), { density: 300 });
-      const obj = phys.track(m.group, mb, 'monitor', 'pc', { restitution: 0.1, friction: 0.8, density: 300 });
+      const mb = body({ x: at.x, y: at.y + 0.745, z: at.z }, monYaw);
+      phys.addCollider(mb, R.ColliderDesc.cuboid(0.13, 0.01, 0.1).setTranslation(0, 0.01, -0.04), { density: 3200, friction: 1, restitution: 0.05 });
+      phys.addCollider(mb, R.ColliderDesc.cuboid(m.half.x, 0.16, 0.03).setTranslation(0, 0.16 + 0.145, 0), { density: 180, friction: 0.8, restitution: 0.05 });
+      const obj = phys.track(m.group, mb, 'monitor', 'pc', { restitution: 0.05, friction: 0.8, density: 180 });
       return { obj, screen: { mesh: m.screen, obj, w: 0.46, h: 0.29 } };
     }
     case 'fan': {
@@ -116,11 +147,11 @@ export function createProp(prop: string, index: number, scene: THREE.Scene, phys
       blades.name = 'spin';
       g.add(blades);
       scene.add(shadowed(g));
-      const y = at.y > 0 ? at.y : at.x > -1 && at.x < 1 ? deskY + 0.05 : 0.02;
-      const b = body({ x: at.x, y, z: at.z });
-      phys.addCollider(b, R.ColliderDesc.cylinder(0.015, 0.1), { density: 900 });
-      phys.addCollider(b, R.ColliderDesc.ball(0.11).setTranslation(0, 0.28, 0.02), { density: 60 });
-      return { obj: phys.track(g, b, 'fan', 'props', { restitution: 0.2, friction: 0.6, density: 60 }) };
+      const b = body({ x: at.x, y: at.y + 0.016, z: at.z });
+      phys.addCollider(b, R.ColliderDesc.cylinder(0.015, 0.1), { density: 2500, friction: 1, restitution: 0.05 });
+      phys.addCollider(b, R.ColliderDesc.cylinder(0.11, 0.012).setTranslation(0, 0.125, 0), { density: 300, restitution: 0.05 });
+      phys.addCollider(b, R.ColliderDesc.ball(0.11).setTranslation(0, 0.28, 0.02), { density: 25, restitution: 0.05 });
+      return { obj: phys.track(g, b, 'fan', 'props', { restitution: 0.05, friction: 0.8, density: 60 }) };
     }
     case 'lamp': {
       const g = new THREE.Group();
@@ -139,21 +170,10 @@ export function createProp(prop: string, index: number, scene: THREE.Scene, phys
       light.position.y = 0.22;
       g.add(light);
       scene.add(shadowed(g));
-      const y = at.y > 0 ? at.y + 0.02 : at.x > -1 && at.x < 1 && at.z < -1.5 ? deskY + 0.03 : 0.01;
-      const b = body({ x: at.x, y, z: at.z });
-      phys.addCollider(b, R.ColliderDesc.cylinder(0.04, 0.06).setTranslation(0, 0.04, 0), { density: 2500 });
-      phys.addCollider(b, R.ColliderDesc.cylinder(0.14, 0.04).setTranslation(0, 0.22, 0), { density: 400 });
-      return { obj: phys.track(g, b, 'lamp', 'props', { restitution: 0.15, friction: 0.6, density: 400 }), light };
-    }
-    case 'poster': {
-      const [t, bg, fg] = POSTERS[index % POSTERS.length]!;
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(0.45, 0.63), mat('#fff', 0.75, 0, { map: posterTex(t, bg, fg) }));
-      m.position.copy(at);
-      if (Math.abs(at.x) > hx - 0.1) m.rotation.y = at.x > 0 ? -Math.PI / 2 : Math.PI / 2;
-      if (at.z > hz - 0.1) m.rotation.y = Math.PI;
-      m.rotation.z = (index % 2 ? 1 : -1) * 0.03;
-      scene.add(m);
-      return {};
+      const b = body({ x: at.x, y: at.y + 0.004, z: at.z }, yaw, true);
+      phys.addCollider(b, R.ColliderDesc.cylinder(0.04, 0.07).setTranslation(0, 0.04, 0), { density: 3000, friction: 1, restitution: 0.05 });
+      phys.addCollider(b, R.ColliderDesc.cylinder(0.14, 0.045).setTranslation(0, 0.22, 0), { density: 300, restitution: 0.05 });
+      return { obj: phys.track(g, b, 'lamp', 'props', { restitution: 0.05, friction: 0.8, density: 400 }), light };
     }
     case 'plant': {
       const g = new THREE.Group();
@@ -168,21 +188,20 @@ export function createProp(prop: string, index: number, scene: THREE.Scene, phys
         g.add(leaf);
       }
       scene.add(shadowed(g));
-      const b = body({ x: at.x, y: 0, z: at.z });
-      phys.addCollider(b, R.ColliderDesc.cylinder(0.15, 0.15).setTranslation(0, 0.15, 0), { density: 900 });
-      phys.addCollider(b, R.ColliderDesc.ball(0.2).setTranslation(0, 0.55, 0), { density: 30 });
-      return { obj: phys.track(g, b, 'plant', 'props', { restitution: 0.1, friction: 0.8, density: 900 }) };
+      const b = body({ x: at.x, y: at.y + 0.004, z: at.z });
+      phys.addCollider(b, R.ColliderDesc.cylinder(0.15, 0.15).setTranslation(0, 0.15, 0), { density: 1200, friction: 0.9, restitution: 0.05 });
+      phys.addCollider(b, R.ColliderDesc.ball(0.2).setTranslation(0, 0.55, 0), { density: 20, restitution: 0.05 });
+      return { obj: phys.track(g, b, 'plant', 'props', { restitution: 0.05, friction: 0.9, density: 900 }) };
     }
     case 'beanbag': {
       const colors = ['#e07a5f', '#3d405b'];
       const m = new THREE.Mesh(new THREE.SphereGeometry(0.42, 28, 20).scale(1, 0.62, 1), mat('#fff', 0.95, 0, { map: fabric(colors[index % 2]!) }));
-      m.position.y = 0;
       const g = new THREE.Group();
       g.add(m);
       scene.add(shadowed(g));
-      const b = body({ x: at.x, y: 0.3, z: at.z });
-      phys.addCollider(b, R.ColliderDesc.ball(0.3), { density: 120, restitution: 0.5, friction: 0.9 });
-      return { obj: phys.track(g, b, 'beanbag', 'props', { restitution: 0.5, friction: 0.9, density: 120 }) };
+      const b = body({ x: at.x, y: at.y + 0.3, z: at.z });
+      phys.addCollider(b, R.ColliderDesc.ball(0.3), { density: 120, restitution: 0.3, friction: 0.95 });
+      return { obj: phys.track(g, b, 'beanbag', 'props', { restitution: 0.3, friction: 0.95, density: 120 }) };
     }
     case 'box': {
       const m = rbox(0.4, 0.4, 0.4, 0.015, mat('#c49a6c', 0.85));
@@ -190,9 +209,9 @@ export function createProp(prop: string, index: number, scene: THREE.Scene, phys
       tape.position.y = 0.2;
       m.add(tape);
       scene.add(shadowed(m));
-      const b = body({ x: at.x, y: at.y, z: at.z });
-      phys.addCollider(b, R.ColliderDesc.cuboid(0.2, 0.2, 0.2), { density: 60, friction: 0.8 });
-      return { obj: phys.track(m, b, 'box', 'props', { restitution: 0.15, friction: 0.8, density: 60 }) };
+      const b = body({ x: at.x, y: at.y + 0.204, z: at.z });
+      phys.addCollider(b, R.ColliderDesc.cuboid(0.2, 0.2, 0.2), { density: 60, friction: 0.9, restitution: 0.05 });
+      return { obj: phys.track(m, b, 'box', 'props', { restitution: 0.05, friction: 0.9, density: 60 }) };
     }
     case 'piggy': {
       const g = new THREE.Group();
@@ -204,10 +223,17 @@ export function createProp(prop: string, index: number, scene: THREE.Scene, phys
       snout.rotation.z = Math.PI / 2;
       snout.position.set(0.12, 0.09, 0);
       g.add(snout);
+      for (const [lx, lz] of [[-0.06, -0.04], [0.06, -0.04], [-0.06, 0.04], [0.06, 0.04]] as const) {
+        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.03, 10), pink);
+        leg.position.set(lx, 0.015, lz);
+        g.add(leg);
+      }
       scene.add(shadowed(g));
-      const b = body({ x: at.x, y: at.y + 0.02, z: at.z });
-      phys.addCollider(b, R.ColliderDesc.ball(0.09).setTranslation(0, 0.09, 0), { density: 700 });
-      return { obj: phys.track(g, b, 'piggy', 'props', { restitution: 0.3, friction: 0.6, density: 700 }) };
+      const b = body({ x: at.x, y: at.y + 0.004, z: at.z }, yaw, true);
+      // Flat-bottomed (legs) so it sits still instead of rolling off the shelf.
+      phys.addCollider(b, R.ColliderDesc.cuboid(0.08, 0.015, 0.055).setTranslation(0, 0.015, 0), { density: 2500, friction: 1, restitution: 0.05 });
+      phys.addCollider(b, R.ColliderDesc.ball(0.09).setTranslation(0, 0.1, 0), { density: 500, restitution: 0.1 });
+      return { obj: phys.track(g, b, 'piggy', 'props', { restitution: 0.1, friction: 0.8, density: 700 }) };
     }
   }
   return {};

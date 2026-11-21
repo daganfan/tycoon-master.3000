@@ -92,6 +92,8 @@ export interface ItemDef {
   /** Which prop the world spawns for each unit. */
   prop?: string;
   phase: Phase;
+  /** Only for sale while this state flag is set (services like the Window Guy). */
+  needsFlag?: string;
 }
 
 export type NodeEffect = StatModifier | { flag: string };
@@ -197,4 +199,6 @@ export interface GameState {
   layout: Record<string, PropPose>;
   /** Phase 2 factory progress. */
   garage: GarageState;
+  /** Unlocked achievement ids. */
+  achievements: string[];
 }

@@ -100,6 +100,7 @@ async function boot(): Promise<void> {
   ui.focusMain = () => world.focusMain();
   ui.unfocus = () => world.setFocus(null);
   ui.tidy = () => world.tidyAll();
+  ui.tidyBusy = () => world.interact.tidyState() !== 'idle';
   ui.loading = '';
   const net = await import('@/net/session');
   if (guest) net.attachGuest(guest, game, world);

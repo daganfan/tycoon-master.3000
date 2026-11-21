@@ -51,4 +51,44 @@ export class Sfx {
   quack(): void {
     this.tone(520, 0.15, 'sawtooth', 0.06, 0, -200);
   }
+
+  /** Filtered white-noise burst. */
+  private noise(dur: number, gain: number, freq: number, delay = 0, q = 1): void {
+    const ac = this.ac();
+    if (!ac || this.volume <= 0) return;
+    const t = ac.currentTime + delay;
+    const buf = ac.createBuffer(1, Math.max(1, Math.floor(ac.sampleRate * dur)), ac.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length) ** 2;
+    const src = ac.createBufferSource();
+    src.buffer = buf;
+    const f = ac.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.value = freq;
+    f.Q.value = q;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(gain * this.volume, t);
+    src.connect(f).connect(g).connect(ac.destination);
+    src.start(t);
+  }
+  /** Breaking glass: a crack, a crash and a shower of tinkles. */
+  shatter(): void {
+    this.noise(0.08, 0.5, 2500, 0, 0.7);
+    this.noise(0.6, 0.35, 5200, 0.02, 0.8);
+    this.tone(180, 0.18, 'triangle', 0.15, 0, -100);
+    for (let i = 0; i < 14; i++) this.tone(2800 + Math.random() * 3800, 0.08 + Math.random() * 0.12, 'sine', 0.03, 0.08 + Math.random() * 0.9);
+  }
+  /** Light switch / button. */
+  snap(): void {
+    this.noise(0.03, 0.25, 3000, 0, 2);
+    this.tone(1400, 0.02, 'square', 0.03);
+  }
+  /** Drawer sliding. */
+  slide(): void {
+    this.noise(0.22, 0.12, 700, 0, 0.6);
+  }
+  /** Achievement unlocked. */
+  fanfare(): void {
+    [523, 659, 784, 1046, 1318].forEach((f, i) => this.tone(f, 0.25, 'triangle', 0.07, i * 0.08));
+  }
 }

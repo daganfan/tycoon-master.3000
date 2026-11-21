@@ -15,4 +15,6 @@ export const ui = $state<{
   unfocus?: () => void;
   /** Return all furniture/props to their home spots. */
   tidy?: () => void;
+  /** True while Tidy Up is running or cooling down. */
+  tidyBusy?: () => boolean;
 }>({ loading: 'Booting up…', hint: '', focused: false, tree: false, modal: null });

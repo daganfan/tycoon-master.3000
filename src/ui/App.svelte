@@ -8,7 +8,7 @@
 
   let { game, onReset }: { game: Game; onReset: () => void } = $props();
 
-  let hud = $state({ cash: '$0', floor: '', tokens: { grind: 0, mogul: 0, chaos: 0 }, quest: '', questTitle: '', exchange: '1.00' });
+  let hud = $state({ tidying: false, cash: '$0', floor: '', tokens: { grind: 0, mogul: 0, chaos: 0 }, quest: '', questTitle: '', exchange: '1.00' });
   let toasts = $state<{ id: number; text: string; tone: string }[]>([]);
   let nextId = 0;
 
@@ -25,11 +25,13 @@
       game.bus.on('notify', (e) => {
         if (!ui.focused) toast(e.text, e.tone);
       }),
+      game.bus.on('achievement', (e) => toast(`🏆 Achievement unlocked: ${e.icon} ${e.name}`, 'trophy')),
     ];
     const iv = setInterval(() => {
       const s = game.state;
       const q = game.activeQuest();
       hud = {
+        tidying: ui.tidyBusy?.() ?? false,
         cash: formatCash(s.cash),
         floor: s.floorCash.gt(0) ? formatCash(s.floorCash) : '',
         tokens: { grind: s.tokens.grind, mogul: s.tokens.mogul, chaos: s.tokens.chaos },
@@ -90,7 +92,7 @@
       <button onclick={() => ui.unfocus?.()}>🚶 Step back <kbd>Esc</kbd></button>
     {:else}
       <button onclick={() => ui.focusMain?.()} data-testid="use-pc">🖥️ Use PC <kbd>E</kbd></button>
-      <button onclick={() => ui.tidy?.()} data-testid="tidy" title="Put all furniture and props back in place">🧹 Tidy up</button>
+      <button onclick={() => ui.tidy?.()} data-testid="tidy" disabled={hud.tidying} title="Put all furniture and props back where you last placed them">{hud.tidying ? '🧹 Tidying…' : '🧹 Tidy up'}</button>
     {/if}
     <button onclick={() => (mpOpen = !mpOpen)} data-testid="mp-button" title="Play with friends">👥 Multiplayer</button>
   </div>
@@ -270,6 +272,11 @@
   }
   .toast.mogul {
     background: #2563ebee;
+  }
+  .toast.trophy {
+    background: linear-gradient(90deg, rgba(120, 80, 0, 0.92), rgba(200, 150, 20, 0.92));
+    border-color: #ffd54a;
+    font-weight: 700;
   }
   .toast.good {
     background: #1f7a35ee;

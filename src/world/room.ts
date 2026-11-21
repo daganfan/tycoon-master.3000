@@ -1,48 +1,51 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Physics, PhysObj } from './physics';
 import { markScreenMaterial } from './render';
-import { ceilingTex, clockFace, crustyPlastic, fabricSet, fringeTex, labelTex, plaster, posterTex, rand, rug, skyTex, woodFloor, woodGrain } from './textures';
+import { ceilingTex, clockFace, crustyPlastic, fabricSet, fringeTex, labelTex, plaster, posterTex, rand, rug, skyTex, woodFloor } from './textures';
+import { mat, merge, placed, rbox, shadowed } from './geo';
+import { buildBed, buildBookcase, buildDesk, buildDresser, buildNightstand, buildTable, buildWallShelf, DESK, type Drawer, type WallShelf } from './furniture';
 
-export const ROOM = { hx: 3, hz: 2.5, h: 2.7 };
+export { mat, rbox, shadowed } from './geo';
+
+/**
+ * The bedroom: 8 m × 6.5 m, 2.7 m ceiling. Its front wall (z = z1) is shared
+ * with the garage, the door sits at x = 1.6 in that wall, the window is in the
+ * right wall (x = x1). hx/hz are half sizes, cx/cz the centre.
+ */
+export const ROOM = { x0: -4.4, x1: 3.6, z0: -4.0, z1: 2.5, h: 2.7, hx: 4, hz: 3.25, cx: -0.4, cz: -0.75 };
 /** The door in the front wall (leads to the garage). */
 export const DOOR = { x: 1.6, w: 0.9, h: 2.05 };
 
-/** Window opening in the right wall (x = +hx). Centre z/y, width along z, height. */
-export const WINDOW = { z: 0.6, y: 1.55, w: 1.4, h: 1.1, depth: 0.16 };
+/** Window opening in the right wall (x = x1). Centre z/y, width along z, height. */
+export const WINDOW = { z: -1.0, y: 1.55, w: 1.6, h: 1.15, depth: 0.16 };
 
-export const mat = (color: string, roughness = 0.6, metalness = 0, extra: Partial<THREE.MeshStandardMaterialParameters> = {}) =>
-  new THREE.MeshStandardMaterial({ color, roughness, metalness, ...extra });
+/** Where the player appears (and is rescued to). */
+export const SPAWN = { x: 0.6, y: 1, z: -0.9 } as const;
 
-export function shadowed<T extends THREE.Object3D>(o: T): T {
-  o.traverse((c) => {
-    if ((c as THREE.Mesh).isMesh) {
-      c.castShadow = true;
-      c.receiveShadow = true;
-    }
-  });
-  return o;
-}
+/** Wall shelves (static). */
+export const WALL_SHELVES: WallShelf[] = [
+  { x: 1.75, y: 1.5, z: ROOM.z0 + 0.11, yaw: 0, w: 0.9, d: 0.22 },
+  { x: -2.2, y: 1.45, z: ROOM.z0 + 0.11, yaw: 0, w: 0.9, d: 0.22 },
+  { x: ROOM.x1 - 0.11, y: 1.45, z: -3.0, yaw: -Math.PI / 2, w: 0.9, d: 0.22 },
+  { x: ROOM.x0 + 0.11, y: 1.6, z: 1.3, yaw: Math.PI / 2, w: 1.0, d: 0.22 },
+];
 
-export const rbox = (w: number, h: number, d: number, r = 0.01, m?: THREE.Material) =>
-  new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 2, Math.min(r, w / 2, h / 2, d / 2)), m);
+/** Floor areas the placement solver keeps clear (door swing, the path to it, the radiator). */
+export const KEEP_OUT: { x0: number; x1: number; z0: number; z1: number }[] = [
+  { x0: DOOR.x - DOOR.w / 2 - 0.15, x1: DOOR.x + DOOR.w / 2 + 0.15, z0: ROOM.z1 - 1.1, z1: ROOM.z1 },
+  { x0: ROOM.x1 - 0.3, x1: ROOM.x1, z0: WINDOW.z - 0.6, z1: WINDOW.z + 0.6 },
+];
 
-/** A geometry translated/rotated in place (for merging many parts into one draw call). */
-function placed(g: THREE.BufferGeometry, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0): THREE.BufferGeometry {
-  const m = new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)), new THREE.Vector3(1, 1, 1));
-  return g.applyMatrix4(m);
-}
-
-/** Merge parts that may or may not be indexed. */
-function merge(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
-  const list = parts.map((p) => {
-    const g = p.index ? p.toNonIndexed() : p;
-    for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'uv') g.deleteAttribute(k);
-    return g;
-  });
-  return mergeGeometries(list, false)!;
-}
+/** Default spots of the built-in furniture (also used to judge "you moved the bed"). */
+export const FURNITURE_HOME = {
+  desk: { x: -0.2, z: ROOM.z0 + DESK.d / 2 + 0.06 },
+  bed: { x: ROOM.x0 + 0.58, z: 1.32 },
+  nightstand: { x: ROOM.x0 + 0.22, z: -0.06 },
+  table: { x: ROOM.x0 + 0.36, z: -2.2 },
+  bookcase: { x: ROOM.x0 + 0.56, z: ROOM.z0 + 0.19 },
+  dresser: { x: -0.75, z: ROOM.z1 - 0.26 },
+} as const;
 
 /** Scale the back half (z < 0) of a geometry, used for tapered CRT housings. */
 function taper(g: THREE.BufferGeometry, depth: number, factor: number): THREE.BufferGeometry {
@@ -92,7 +95,7 @@ export class Cable {
     if (this.a.distanceToSquared(this.last[0]!) < 1e-4 && this.b.distanceToSquared(this.last[1]!) < 1e-4) return;
     this.last[0]!.copy(this.a);
     this.last[1]!.copy(this.b);
-    const wallZ = -ROOM.hz + 0.05;
+    const wallZ = ROOM.z0 + 0.05;
     const far = Math.abs(this.a.z - wallZ) > 1.3 || Math.abs(this.b.z - wallZ) > 1.3 || this.a.y < -0.5 || this.b.y < -0.5;
     this.mesh.visible = !far;
     if (far) return;
@@ -118,6 +121,11 @@ export interface RoomRefs {
   monitor: PhysObj;
   screen: Screen;
   chair: PhysObj;
+  bed: PhysObj;
+  /** Every other built-in piece of furniture, by stable id. */
+  furniture: Record<string, PhysObj>;
+  /** Drawers that open with E / click. */
+  drawers: Drawer[];
   garageSign: THREE.Mesh;
   /** Door pivot (hinge on the -x edge); the garage module swings it open. */
   door: THREE.Group;
@@ -126,6 +134,14 @@ export interface RoomRefs {
   sky: THREE.ShaderMaterial;
   /** Window glass (for reflection tuning by time of day). */
   glass: THREE.MeshStandardMaterial;
+  /** The glass pane mesh (hidden when the window is broken) and the window group. */
+  pane: THREE.Mesh;
+  windowGroup: THREE.Group;
+  /** Curtain panels (sway when bumped). */
+  curtains: THREE.Mesh[];
+  /** Light switch toggle (flips when used) and the PC power button. */
+  lightToggle: THREE.Mesh;
+  powerButton: THREE.Mesh;
   /** Animated details (cables, wall clock, PC LEDs). */
   update(dt: number): void;
 }
@@ -295,80 +311,6 @@ const CROWN: [number, number][] = [
   [0.1, 0],
 ];
 
-/** Draped blanket over a mattress: flat top, rounded edge, hanging sides and foot, with folds. */
-function blanketGeo(W: number, L: number, hang: number, footHang: number): THREE.BufferGeometry {
-  const rc = 0.05;
-  const a = W / 2 - rc;
-  const arc = (rc * Math.PI) / 2;
-  const sMax = a + arc + hang;
-  const tFlat = L - rc;
-  const tMax = tFlat + arc + footHang;
-  const segS = 48;
-  const segT = 60;
-  const g = new THREE.PlaneGeometry(1, 1, segS, segT);
-  const pos = g.attributes.position as THREE.BufferAttribute;
-  const uv = g.attributes.uv as THREE.BufferAttribute;
-  const r = rand(97);
-  const phases = Array.from({ length: 6 }, () => r() * Math.PI * 2);
-  const drape = (u: number): [number, number] => {
-    // returns [offset along axis, drop]
-    const au = Math.abs(u);
-    if (au <= a) return [u, 0];
-    const sgn = Math.sign(u);
-    if (au <= a + arc) {
-      const phi = (au - a) / rc;
-      return [sgn * (a + rc * Math.sin(phi)), rc * (1 - Math.cos(phi))];
-    }
-    const d = au - a - arc;
-    return [sgn * (a + rc + 0.03 * (d / Math.max(0.01, hang)) ** 2), rc + d];
-  };
-  for (let i = 0; i < pos.count; i++) {
-    const s = (uv.getX(i) * 2 - 1) * sMax;
-    const t = (1 - uv.getY(i)) * tMax; // 0 at head end
-    const [x, dropS] = drape(s);
-    let z: number;
-    let dropT = 0;
-    if (t <= tFlat) z = t;
-    else if (t <= tFlat + arc) {
-      const phi = (t - tFlat) / rc;
-      z = tFlat + rc * Math.sin(phi);
-      dropT = rc * (1 - Math.cos(phi));
-    } else {
-      const d = t - tFlat - arc;
-      z = tFlat + rc + 0.02 * (d / footHang) ** 2;
-      dropT = rc + d;
-    }
-    const top = Math.max(0, 1 - Math.max(dropS, dropT) / 0.02);
-    // soft lumps on top, vertical folds where it hangs
-    const lump = 0.01 + 0.009 * Math.sin(t * 7 + phases[0]!) * Math.sin(s * 5 + phases[1]!) + 0.005 * Math.sin(t * 13 + s * 4 + phases[2]!);
-    const hangAmt = Math.min(1, Math.max(dropS, dropT) / 0.12);
-    const fold = 0.01 * Math.sin((dropS > dropT ? t : s) * 18 + phases[3]!) * hangAmt + 0.004 * Math.sin((dropS > dropT ? t : s) * 41 + phases[4]!) * hangAmt;
-    const nx = dropS > 0.02 ? Math.sign(s) : 0;
-    const nz = dropT > 0.02 ? 1 : 0;
-    pos.setXYZ(i, x + nx * fold, lump * top - dropS - dropT, z + nz * fold);
-  }
-  g.computeVertexNormals();
-  uv.needsUpdate = true;
-  return g;
-}
-
-/** Puffy pillow from a sphere: squared-off silhouette with pinched seams. */
-function pillowGeo(W: number, H: number, D: number): THREE.BufferGeometry {
-  const g = new THREE.SphereGeometry(1, 32, 20);
-  const p = g.attributes.position as THREE.BufferAttribute;
-  for (let i = 0; i < p.count; i++) {
-    const x = p.getX(i);
-    const y = p.getY(i);
-    const z = p.getZ(i);
-    const sx = Math.sign(x) * Math.abs(x) ** 0.45;
-    const sz = Math.sign(z) * Math.abs(z) ** 0.45;
-    const edge = (1 - 0.55 * sx * sx) * (1 - 0.55 * sz * sz);
-    p.setXYZ(i, (sx * W) / 2, (y * H * edge) / 2, (sz * D) / 2);
-  }
-  g.computeVertexNormals();
-  return g;
-}
-
 /** Curtain panel with vertical folds (faces +z in local space). */
 function curtainGeo(w: number, h: number, folds: number, seed: number): THREE.BufferGeometry {
   const g = new THREE.PlaneGeometry(w, h, Math.max(16, folds * 6), 24);
@@ -389,16 +331,18 @@ function curtainGeo(w: number, h: number, folds: number, seed: number): THREE.Bu
 
 export function buildRoom(scene: THREE.Scene, phys: Physics): RoomRefs {
   const R = phys.R;
-  const { hx, hz, h } = ROOM;
+  const { x0, x1, z0, z1, h, hx, hz, cx, cz } = ROOM;
 
   // ------------------------------------------------------------ floor
   const wood = woodFloor();
+  for (const t of [wood.map, wood.rough, wood.normal]) t.repeat.multiply(new THREE.Vector2(hx / 3, hz / 2.5));
   const floorMat = mat('#ffffff', 1, 0, { map: wood.map, roughnessMap: wood.rough, normalMap: wood.normal, normalScale: new THREE.Vector2(0.7, 0.7) });
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(hx * 2, hz * 2), floorMat);
   floor.rotation.x = -Math.PI / 2;
+  floor.position.set(cx, 0, cz);
   floor.receiveShadow = true;
   scene.add(floor);
-  phys.staticBox({ x: hx + 1, y: 0.1, z: hz + 1 }, { x: 0, y: -0.1, z: 0 });
+  phys.staticBox({ x: hx + 1, y: 0.1, z: hz + 1 }, { x: cx, y: -0.1, z: cz });
 
   // ------------------------------------------------------------ walls + ceiling
   const pl = plaster(36, 20, 80);
@@ -412,26 +356,34 @@ export function buildRoom(scene: THREE.Scene, phys: Physics): RoomRefs {
     m.castShadow = true;
     scene.add(m);
   };
-  wall(hx * 2, new THREE.Vector3(0, h / 2, -hz), 0);
+  wall(hx * 2, new THREE.Vector3(cx, h / 2, z0), 0);
   // Front wall with a doorway (to the garage).
   const dl = DOOR.x - DOOR.w / 2;
   const dr = DOOR.x + DOOR.w / 2;
-  wall(dl + hx, new THREE.Vector3((dl - hx) / 2, h / 2, hz), Math.PI);
-  wall(hx - dr, new THREE.Vector3((dr + hx) / 2, h / 2, hz), Math.PI);
-  wall(DOOR.w, new THREE.Vector3(DOOR.x, (DOOR.h + h) / 2, hz), Math.PI, [], h - DOOR.h);
-  wall(hz * 2, new THREE.Vector3(-hx, h / 2, 0), Math.PI / 2);
-  wall(hz * 2, new THREE.Vector3(hx, h / 2, 0), -Math.PI / 2, [{ x: WINDOW.z, y: WINDOW.y - h / 2, w: WINDOW.w, h: WINDOW.h }]);
-  phys.staticBox({ x: hx, y: h, z: 0.1 }, { x: 0, y: h / 2, z: -hz - 0.1 });
-  phys.staticBox({ x: (dl + hx) / 2, y: h / 2, z: 0.1 }, { x: (dl - hx) / 2, y: h / 2, z: hz + 0.1 });
-  phys.staticBox({ x: (hx - dr) / 2, y: h / 2, z: 0.1 }, { x: (dr + hx) / 2, y: h / 2, z: hz + 0.1 });
-  phys.staticBox({ x: DOOR.w / 2, y: (h - DOOR.h) / 2, z: 0.1 }, { x: DOOR.x, y: (h + DOOR.h) / 2, z: hz + 0.1 });
-  phys.staticBox({ x: 0.1, y: h, z: hz }, { x: -hx - 0.1, y: h / 2, z: 0 });
-  phys.staticBox({ x: 0.1, y: h, z: hz }, { x: hx + 0.1, y: h / 2, z: 0 });
-  phys.staticBox({ x: hx, y: 0.1, z: hz }, { x: 0, y: h + 0.1, z: 0 });
+  wall(dl - x0, new THREE.Vector3((dl + x0) / 2, h / 2, z1), Math.PI);
+  wall(x1 - dr, new THREE.Vector3((dr + x1) / 2, h / 2, z1), Math.PI);
+  wall(DOOR.w, new THREE.Vector3(DOOR.x, (DOOR.h + h) / 2, z1), Math.PI, [], h - DOOR.h);
+  wall(hz * 2, new THREE.Vector3(x0, h / 2, cz), Math.PI / 2);
+  wall(hz * 2, new THREE.Vector3(x1, h / 2, cz), -Math.PI / 2, [{ x: WINDOW.z - cz, y: WINDOW.y - h / 2, w: WINDOW.w, h: WINDOW.h }]);
+  phys.staticBox({ x: hx, y: h, z: 0.1 }, { x: cx, y: h / 2, z: z0 - 0.1 });
+  phys.staticBox({ x: (dl - x0) / 2, y: h / 2, z: 0.1 }, { x: (dl + x0) / 2, y: h / 2, z: z1 + 0.1 });
+  phys.staticBox({ x: (x1 - dr) / 2, y: h / 2, z: 0.1 }, { x: (dr + x1) / 2, y: h / 2, z: z1 + 0.1 });
+  phys.staticBox({ x: DOOR.w / 2, y: (h - DOOR.h) / 2, z: 0.1 }, { x: DOOR.x, y: (h + DOOR.h) / 2, z: z1 + 0.1 });
+  phys.staticBox({ x: 0.1, y: h, z: hz }, { x: x0 - 0.1, y: h / 2, z: cz });
+  // Right wall: solid around the window opening (the glass has its own, breakable collider).
+  const wy0 = WINDOW.y - WINDOW.h / 2;
+  const wy1 = WINDOW.y + WINDOW.h / 2;
+  const wz0 = WINDOW.z - WINDOW.w / 2;
+  const wz1 = WINDOW.z + WINDOW.w / 2;
+  phys.staticBox({ x: 0.1, y: wy0 / 2, z: hz }, { x: x1 + 0.1, y: wy0 / 2, z: cz });
+  phys.staticBox({ x: 0.1, y: (h - wy1) / 2 + 0.5, z: hz }, { x: x1 + 0.1, y: (h + wy1) / 2 + 0.5, z: cz });
+  phys.staticBox({ x: 0.1, y: (wy1 - wy0) / 2, z: (wz0 - z0) / 2 }, { x: x1 + 0.1, y: WINDOW.y, z: (z0 + wz0) / 2 });
+  phys.staticBox({ x: 0.1, y: (wy1 - wy0) / 2, z: (z1 - wz1) / 2 }, { x: x1 + 0.1, y: WINDOW.y, z: (wz1 + z1) / 2 });
+  phys.staticBox({ x: hx, y: 0.1, z: hz }, { x: cx, y: h + 0.1, z: cz });
   const ct = ceilingTex();
   const ceil = new THREE.Mesh(new THREE.PlaneGeometry(hx * 2, hz * 2), mat('#ffffff', 0.95, 0, { map: ct.map, normalMap: ct.normal, normalScale: new THREE.Vector2(0.5, 0.5) }));
   ceil.rotation.x = Math.PI / 2;
-  ceil.position.y = h;
+  ceil.position.set(cx, h, cz);
   ceil.castShadow = true;
   ceil.receiveShadow = true;
   scene.add(ceil);
@@ -440,12 +392,12 @@ export function buildRoom(scene: THREE.Scene, phys: Physics): RoomRefs {
   const trimM = mat('#f4f0e6', 0.45);
   // base: false = crown only (front wall has the doorway, so its baseboard is split in two)
   const walls: { len: number; x: number; z: number; ry: number; base?: boolean; crown?: boolean }[] = [
-    { len: hx * 2, x: 0, z: -hz, ry: 0 },
-    { len: hx * 2, x: 0, z: hz, ry: Math.PI, base: false },
-    { len: dl + hx, x: (dl - hx) / 2, z: hz, ry: Math.PI, crown: false },
-    { len: hx - dr, x: (dr + hx) / 2, z: hz, ry: Math.PI, crown: false },
-    { len: hz * 2, x: -hx, z: 0, ry: Math.PI / 2 },
-    { len: hz * 2, x: hx, z: 0, ry: -Math.PI / 2 },
+    { len: hx * 2, x: cx, z: z0, ry: 0 },
+    { len: hx * 2, x: cx, z: z1, ry: Math.PI, base: false },
+    { len: dl - x0, x: (dl + x0) / 2, z: z1, ry: Math.PI, crown: false },
+    { len: x1 - dr, x: (dr + x1) / 2, z: z1, ry: Math.PI, crown: false },
+    { len: hz * 2, x: x0, z: cz, ry: Math.PI / 2 },
+    { len: hz * 2, x: x1, z: cz, ry: -Math.PI / 2 },
   ];
   const trims: THREE.BufferGeometry[] = [];
   for (const wdef of walls) {
@@ -459,13 +411,13 @@ export function buildRoom(scene: THREE.Scene, phys: Physics): RoomRefs {
 
   // ------------------------------------------------------------ window (right wall)
   const win = new THREE.Group();
-  win.position.set(hx, WINDOW.y, WINDOW.z);
+  win.name = 'window';
+  win.position.set(x1, WINDOW.y, WINDOW.z);
   win.rotation.y = -Math.PI / 2; // local +z points into the room, local +x = world +z
   const frameM = mat('#f7f6f0', 0.38);
   const ww = WINDOW.w;
   const wh = WINDOW.h;
   const dpt = WINDOW.depth;
-  // Reveal (inside of the wall thickness)
   const reveal = merge([
     placed(new THREE.PlaneGeometry(ww, dpt), 0, wh / 2, -dpt / 2, Math.PI / 2),
     placed(new THREE.PlaneGeometry(ww, dpt), 0, -wh / 2, -dpt / 2, -Math.PI / 2),
@@ -476,7 +428,6 @@ export function buildRoom(scene: THREE.Scene, phys: Physics): RoomRefs {
   revealMesh.receiveShadow = true;
   revealMesh.castShadow = true;
   win.add(revealMesh);
-  // Sashes + muntins set back in the reveal
   const sashZ = -dpt + 0.05;
   const sash = merge([
     placed(new THREE.BoxGeometry(ww, 0.06, 0.05), 0, wh / 2 - 0.03, sashZ),
@@ -498,35 +449,31 @@ export function buildRoom(scene: THREE.Scene, phys: Physics): RoomRefs {
   pane.renderOrder = 2;
   pane.userData.noAO = true;
   win.add(pane);
-  // Casing on the wall surface + sill (stool) + apron
   const casing = merge([
     placed(new RoundedBoxGeometry(ww + 0.2, 0.08, 0.02, 2, 0.006), 0, wh / 2 + 0.04, 0.01),
     placed(new RoundedBoxGeometry(0.08, wh + 0.12, 0.02, 2, 0.006), -ww / 2 - 0.04, 0.02, 0.01),
     placed(new RoundedBoxGeometry(0.08, wh + 0.12, 0.02, 2, 0.006), ww / 2 + 0.04, 0.02, 0.01),
     placed(new RoundedBoxGeometry(ww + 0.12, 0.07, 0.02, 2, 0.006), 0, -wh / 2 - 0.075, 0.01),
   ]);
-  const casingMesh = new THREE.Mesh(casing, frameM);
-  win.add(casingMesh);
+  win.add(new THREE.Mesh(casing, frameM));
   const sill = rbox(ww + 0.26, 0.03, dpt + 0.07, 0.008, frameM);
   sill.position.set(0, -wh / 2 - 0.015, -dpt / 2 + 0.035);
   win.add(sill);
   scene.add(shadowed(win));
   pane.castShadow = false;
   pane.receiveShadow = false;
-  // Sky + scenery outside, far enough to give parallax
   const skyMat = new THREE.ShaderMaterial({
     uniforms: { dayMap: { value: skyTex(false) }, nightMap: { value: skyTex(true) }, day: { value: 1 }, dusk: { value: 0 }, intensity: { value: 2.2 } },
     vertexShader: SKY_VERT,
     fragmentShader: SKY_FRAG,
   });
   const sky = new THREE.Mesh(new THREE.PlaneGeometry(9, 4.5), skyMat);
-  sky.position.set(hx + 2.4, 1.3, WINDOW.z);
+  sky.position.set(x1 + 2.4, 1.3, WINDOW.z);
   sky.rotation.y = -Math.PI / 2;
   scene.add(sky);
   // Little plant on the sill
-  const potM = mat('#b5653b', 0.8);
-  const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.04, 0.09, 20), potM);
-  pot.position.set(hx + 0.02, WINDOW.y - wh / 2 + 0.045, WINDOW.z - 0.45);
+  const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.04, 0.09, 20), mat('#b5653b', 0.8));
+  pot.position.set(x1 + 0.02, WINDOW.y - wh / 2 + 0.045, WINDOW.z - 0.55);
   scene.add(shadowed(pot));
   const leafM = mat('#3f7a3a', 0.6, 0, { side: THREE.DoubleSide });
   const lr = rand(5);
@@ -541,17 +488,23 @@ export function buildRoom(scene: THREE.Scene, phys: Physics): RoomRefs {
   plant.position.set(pot.position.x, pot.position.y + 0.04, pot.position.z);
   scene.add(shadowed(plant));
 
-  // Curtains + rod
+  // Curtains + rod (each panel hangs from a pivot at the rod so it can sway).
   const curtainSet = fabricSet('#c9b48e', [3, 4]);
   const curtainM = mat('#ffffff', 0.92, 0, { map: curtainSet.map, normalMap: curtainSet.normal, side: THREE.DoubleSide });
   const rodY = wh / 2 + 0.17;
   const curtainH = rodY - (-wh / 2 - 0.12);
+  const curtains: THREE.Mesh[] = [];
   for (const side of [-1, 1]) {
-    const c = new THREE.Mesh(curtainGeo(0.42, curtainH, 4, side + 5), curtainM);
-    c.position.set(side * (ww / 2 + 0.06), rodY - curtainH / 2 - 0.02, 0.05);
-    win.add(c);
+    const pivot = new THREE.Group();
+    pivot.position.set(side * (ww / 2 + 0.06), rodY - 0.02, 0.05);
+    win.add(pivot);
+    const c = new THREE.Mesh(curtainGeo(0.46, curtainH, 4, side + 5), curtainM);
+    c.position.set(0, -curtainH / 2, 0);
     c.castShadow = true;
     c.receiveShadow = true;
+    c.name = 'curtain';
+    pivot.add(c);
+    curtains.push(c);
   }
   const metal = mat('#3a3631', 0.35, 0.8);
   const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, ww + 0.5, 12), metal);
@@ -567,130 +520,59 @@ export function buildRoom(scene: THREE.Scene, phys: Physics): RoomRefs {
   // Radiator under the window
   const radM = mat('#f3f1ea', 0.35, 0.1);
   const fins: THREE.BufferGeometry[] = [];
-  const nFins = 14;
-  for (let i = 0; i < nFins; i++) fins.push(placed(new RoundedBoxGeometry(0.05, 0.5, 0.065, 2, 0.015), -0.455 + i * 0.07, 0, 0));
-  fins.push(placed(new THREE.CylinderGeometry(0.018, 0.018, 0.99, 10), 0, 0.2, 0, 0, 0, Math.PI / 2));
-  fins.push(placed(new THREE.CylinderGeometry(0.018, 0.018, 0.99, 10), 0, -0.2, 0, 0, 0, Math.PI / 2));
-  fins.push(placed(new THREE.CylinderGeometry(0.012, 0.012, 0.16, 10), 0.5, -0.32, 0));
-  fins.push(placed(new THREE.CylinderGeometry(0.02, 0.02, 0.05, 12), 0.5, -0.24, 0));
+  for (let i = 0; i < 16; i++) fins.push(placed(new RoundedBoxGeometry(0.05, 0.5, 0.065, 2, 0.015), -0.525 + i * 0.07, 0, 0));
+  fins.push(placed(new THREE.CylinderGeometry(0.018, 0.018, 1.13, 10), 0, 0.2, 0, 0, 0, Math.PI / 2));
+  fins.push(placed(new THREE.CylinderGeometry(0.018, 0.018, 1.13, 10), 0, -0.2, 0, 0, 0, Math.PI / 2));
+  fins.push(placed(new THREE.CylinderGeometry(0.012, 0.012, 0.16, 10), 0.57, -0.32, 0));
+  fins.push(placed(new THREE.CylinderGeometry(0.02, 0.02, 0.05, 12), 0.57, -0.24, 0));
   const radiator = new THREE.Mesh(merge(fins), radM);
-  radiator.position.set(hx - 0.075, 0.42, WINDOW.z);
+  radiator.position.set(x1 - 0.075, 0.42, WINDOW.z);
   radiator.rotation.y = -Math.PI / 2;
   scene.add(shadowed(radiator));
-  phys.staticBox({ x: 0.04, y: 0.27, z: 0.5 }, { x: hx - 0.075, y: 0.42, z: WINDOW.z });
+  phys.staticBox({ x: 0.04, y: 0.27, z: 0.57 }, { x: x1 - 0.075, y: 0.42, z: WINDOW.z });
 
   // ------------------------------------------------------------ rug with fringe
+  const rugW = 2.8;
+  const rugD = 2.0;
+  const rugX = cx + 0.5;
+  const rugZ = cz + 0.35;
   const rugM = mat('#ffffff', 1, 0, { map: rug(), normalMap: fabricSet('#808080', [18, 13]).normal, normalScale: new THREE.Vector2(0.5, 0.5) });
-  const rugMesh = new THREE.Mesh(new RoundedBoxGeometry(2.2, 0.012, 1.6, 2, 0.005), rugM);
-  rugMesh.position.set(0.3, 0.0, 0.4);
+  const rugMesh = new THREE.Mesh(new RoundedBoxGeometry(rugW, 0.012, rugD, 2, 0.005), rugM);
+  rugMesh.position.set(rugX, 0.0, rugZ);
   rugMesh.receiveShadow = true;
   scene.add(rugMesh);
   const fringeM = mat('#ffffff', 1, 0, { map: fringeTex(), alphaTest: 0.5, side: THREE.DoubleSide });
   for (const side of [-1, 1]) {
-    const f = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.07), fringeM);
+    const f = new THREE.Mesh(new THREE.PlaneGeometry(rugD * 0.94, 0.07), fringeM);
     f.rotation.x = -Math.PI / 2;
     f.rotation.z = side > 0 ? Math.PI / 2 : -Math.PI / 2;
-    f.position.set(0.3 + side * (1.1 + 0.033), 0.004, 0.4);
+    f.position.set(rugX + side * (rugW / 2 + 0.033), 0.004, rugZ);
     f.receiveShadow = true;
     scene.add(f);
   }
 
-  // ------------------------------------------------------------ bed (static)
-  const bed = new THREE.Group();
-  const walnut = woodGrain([24, 40, 28], 9, [1, 1]);
-  const frameW = mat('#ffffff', 0.55, 0, { map: walnut.map, normalMap: walnut.normal, normalScale: new THREE.Vector2(0.4, 0.4) });
-  const sideRail = merge([
-    placed(new RoundedBoxGeometry(0.05, 0.2, 2.0, 2, 0.01), -0.5, 0.2, 0),
-    placed(new RoundedBoxGeometry(0.05, 0.2, 2.0, 2, 0.01), 0.5, 0.2, 0),
-    placed(new RoundedBoxGeometry(1.05, 0.2, 0.05, 2, 0.01), 0, 0.2, 0.99),
-    placed(new RoundedBoxGeometry(1.0, 0.04, 1.96, 2, 0.01), 0, 0.28, 0),
-  ]);
-  bed.add(new THREE.Mesh(sideRail, frameW));
-  for (const [x, z] of [[-0.5, -0.98], [0.5, -0.98], [-0.5, 0.98], [0.5, 0.98]] as const) {
-    const leg = rbox(0.06, 0.12, 0.06, 0.01, frameW);
-    leg.position.set(x, 0.06, z);
-    bed.add(leg);
-  }
-  const headboard = merge([
-    placed(new RoundedBoxGeometry(1.1, 0.06, 0.07, 2, 0.02), 0, 0.92, -1.0),
-    placed(new RoundedBoxGeometry(0.07, 0.95, 0.07, 2, 0.02), -0.53, 0.47, -1.0),
-    placed(new RoundedBoxGeometry(0.07, 0.95, 0.07, 2, 0.02), 0.53, 0.47, -1.0),
-    placed(new RoundedBoxGeometry(1.0, 0.38, 0.03, 2, 0.01), 0, 0.68, -1.0),
-  ]);
-  bed.add(new THREE.Mesh(headboard, frameW));
-  const footboard = merge([
-    placed(new RoundedBoxGeometry(1.1, 0.05, 0.06, 2, 0.02), 0, 0.5, 1.01),
-    placed(new RoundedBoxGeometry(0.06, 0.52, 0.06, 2, 0.02), -0.53, 0.26, 1.01),
-    placed(new RoundedBoxGeometry(0.06, 0.52, 0.06, 2, 0.02), 0.53, 0.26, 1.01),
-  ]);
-  bed.add(new THREE.Mesh(footboard, frameW));
-  const sheet = fabricSet('#efece4', [4, 6]);
-  const mattress = rbox(0.95, 0.18, 1.92, 0.06, mat('#ffffff', 0.9, 0, { map: sheet.map, normalMap: sheet.normal }));
-  mattress.position.y = 0.39;
-  bed.add(mattress);
-  const blanketSet = fabricSet('#3c5a8a', [5, 6]);
-  const blanketM = mat('#ffffff', 0.95, 0, { map: blanketSet.map, normalMap: blanketSet.normal, side: THREE.DoubleSide });
-  const blanket = new THREE.Mesh(blanketGeo(0.97, 1.32, 0.2, 0.18), blanketM);
-  blanket.position.set(0, 0.495, -0.34);
-  bed.add(blanket);
-  const turn = rbox(0.99, 0.035, 0.16, 0.016, mat('#ffffff', 0.9, 0, { map: sheet.map, normalMap: sheet.normal }));
-  turn.position.set(0, 0.5, -0.33);
-  turn.rotation.x = 0.05;
-  bed.add(turn);
-  const pillowM = mat('#ffffff', 0.92, 0, { map: sheet.map, normalMap: sheet.normal });
-  const pillow = new THREE.Mesh(pillowGeo(0.62, 0.16, 0.36), pillowM);
-  pillow.position.set(0, 0.55, -0.72);
-  pillow.rotation.x = -0.25;
-  bed.add(pillow);
-  const throwSet = fabricSet('#c4703c', [1, 1]);
-  const throwPillow = new THREE.Mesh(pillowGeo(0.36, 0.13, 0.36), mat('#ffffff', 0.95, 0, { map: throwSet.map, normalMap: throwSet.normal }));
-  throwPillow.position.set(0.18, 0.6, -0.6);
-  throwPillow.rotation.set(-0.9, 0.3, 0.1);
-  bed.add(throwPillow);
-  bed.position.set(-hx + 0.55, 0, 0.9);
-  scene.add(shadowed(bed));
-  phys.staticBox({ x: 0.5, y: 0.25, z: 1.0 }, { x: -hx + 0.55, y: 0.25, z: 0.9 });
-
-  // ------------------------------------------------------------ desk (dynamic, heavy, can be shoved)
-  const deskTopY = 0.76;
-  const oak = woodGrain([33, 45, 50], 13, [1, 1]);
-  const deskMat = mat('#ffffff', 0.45, 0, { map: oak.map, normalMap: oak.normal, normalScale: new THREE.Vector2(0.3, 0.3) });
-  const desk = new THREE.Group();
-  const top = rbox(1.6, 0.045, 0.72, 0.01, deskMat);
-  top.position.y = deskTopY;
-  top.name = 'desk-top';
-  desk.add(top);
-  const legM = mat('#26272a', 0.38, 0.7);
-  for (const [x, z] of [[-0.75, -0.31], [0.75, -0.31], [-0.75, 0.31], [0.75, 0.31]] as const) {
-    const leg = rbox(0.045, deskTopY, 0.045, 0.01, legM);
-    leg.position.set(x, deskTopY / 2, z);
-    desk.add(leg);
-  }
-  const rails = merge([placed(new THREE.BoxGeometry(1.46, 0.05, 0.02), 0, deskTopY - 0.06, -0.31), placed(new THREE.BoxGeometry(0.02, 0.05, 0.58), -0.75, deskTopY - 0.06, 0), placed(new THREE.BoxGeometry(0.02, 0.05, 0.58), 0.75, deskTopY - 0.06, 0)]);
-  desk.add(new THREE.Mesh(rails, legM));
-  // pencil drawer
-  const drawerM = mat('#ffffff', 0.5, 0, { map: oak.map, normalMap: oak.normal });
-  const drawer = rbox(0.5, 0.08, 0.6, 0.006, drawerM);
-  drawer.position.set(0.42, deskTopY - 0.0225 - 0.042, 0.0);
-  desk.add(drawer);
-  const handle = rbox(0.14, 0.012, 0.016, 0.005, mat('#b9b9b9', 0.25, 1));
-  handle.position.set(0.42, deskTopY - 0.065, 0.305);
-  desk.add(handle);
-  scene.add(shadowed(desk));
-  const deskBody = phys.createBody({ pos: { x: 0, y: 0, z: -hz + 0.42 }, angularDamping: 2, linearDamping: 1.5 });
-  phys.addCollider(deskBody, R.ColliderDesc.cuboid(0.8, 0.0225, 0.36).setTranslation(0, deskTopY, 0), { density: 220, friction: 0.9 });
-  for (const [x, z] of [[-0.75, -0.31], [0.75, -0.31], [-0.75, 0.31], [0.75, 0.31]] as const)
-    phys.addCollider(deskBody, R.ColliderDesc.cuboid(0.0225, deskTopY / 2, 0.0225).setTranslation(x, deskTopY / 2, z), { density: 800, friction: 1 });
-  const deskObj = phys.track(desk, deskBody, 'desk', 'desk', { restitution: 0.05, friction: 0.9, density: 220 });
+  // ------------------------------------------------------------ furniture (dynamic: shove the heavy ones, carry the light ones)
+  const H = FURNITURE_HOME;
+  const deskF = buildDesk(scene, phys, H.desk.x, H.desk.z);
+  const deskObj = deskF.obj;
+  const deskTopY = DESK.top;
+  const bedF = buildBed(scene, phys, H.bed.x, H.bed.z);
+  const nightF = buildNightstand(scene, phys, H.nightstand.x, H.nightstand.z, Math.PI / 2);
+  const tableF = buildTable(scene, phys, H.table.x, H.table.z, Math.PI / 2);
+  const caseF = buildBookcase(scene, phys, H.bookcase.x, H.bookcase.z, 0);
+  const dresserF = buildDresser(scene, phys, H.dresser.x, H.dresser.z, Math.PI);
+  WALL_SHELVES.forEach((s, i) => buildWallShelf(scene, phys, s, i === 0 || i === 3, i));
 
   // ------------------------------------------------------------ crusty main monitor (dynamic)
+  const dX = H.desk.x;
+  const dZ = H.desk.z;
   const mon = buildMonitor(0.52, 0.36, true);
   scene.add(mon.group);
-  const monBody = phys.createBody({ pos: { x: -0.1, y: deskTopY + 0.03, z: -hz + 0.42 }, angularDamping: 0.6 });
-  phys.addCollider(monBody, R.ColliderDesc.cuboid(0.16, 0.01, 0.11).setTranslation(0, 0.01, -0.04), { density: 2000, friction: 0.9 });
-  phys.addCollider(monBody, R.ColliderDesc.cuboid(mon.half.x, 0.21, 0.16).setTranslation(0, 0.16 + 0.18, -0.13), { density: 150, friction: 0.7 });
-  const monitor = phys.track(mon.group, monBody, 'monitor', 'pc', { restitution: 0.1, friction: 0.8, density: 150 });
-  // Sticky note on the bezel
+  const monBody = phys.createBody({ pos: { x: dX, y: deskTopY + 0.026, z: dZ + 0.06 }, angularDamping: 1.2, linearDamping: 0.4 });
+  phys.addCollider(monBody, R.ColliderDesc.cuboid(0.16, 0.01, 0.12).setTranslation(0, 0.01, -0.06), { density: 2400, friction: 1, restitution: 0.05 });
+  phys.addCollider(monBody, R.ColliderDesc.cuboid(mon.half.x, 0.21, 0.16).setTranslation(0, 0.16 + 0.18, -0.13), { density: 140, friction: 0.8, restitution: 0.05 });
+  phys.addCollider(monBody, R.ColliderDesc.cuboid(0.09, 0.06, 0.09).setTranslation(0, 0.08, -0.08), { density: 600, friction: 0.8, restitution: 0.05 });
+  const monitor = phys.track(mon.group, monBody, 'monitor', 'pc', { restitution: 0.05, friction: 0.8, density: 140 });
   const note = new THREE.Mesh(new THREE.PlaneGeometry(0.08, 0.08), mat('#ffffff', 0.9, 0, { map: labelTex('Rent due.\n-Mom', '#fff59d', '#333', 256, 256, 44) }));
   note.material.userData.noSkin = true;
   note.position.set(0.3, 0.5, 0.0515);
@@ -710,17 +592,14 @@ export function buildRoom(scene: THREE.Scene, phys: Physics): RoomRefs {
   faceplate.position.set(0, 0.21, 0.214);
   tower.add(faceplate);
   const bayParts: THREE.BufferGeometry[] = [];
-  // two 5.25" bays (CD-ROM + blank) and a 3.5" floppy
   bayParts.push(placed(new RoundedBoxGeometry(0.16, 0.042, 0.006, 1, 0.002), 0, 0.37, 0.225));
   bayParts.push(placed(new RoundedBoxGeometry(0.16, 0.042, 0.006, 1, 0.002), 0, 0.322, 0.225));
   bayParts.push(placed(new RoundedBoxGeometry(0.1, 0.026, 0.006, 1, 0.002), 0, 0.27, 0.225));
-  const bays = new THREE.Mesh(merge(bayParts), mat('#e5dfcd', 0.55));
-  tower.add(bays);
+  tower.add(new THREE.Mesh(merge(bayParts), mat('#e5dfcd', 0.55)));
   const slits: THREE.BufferGeometry[] = [];
   slits.push(placed(new THREE.BoxGeometry(0.13, 0.003, 0.004), 0, 0.362, 0.228));
   slits.push(placed(new THREE.BoxGeometry(0.012, 0.006, 0.004), 0.06, 0.358, 0.229));
   slits.push(placed(new THREE.BoxGeometry(0.08, 0.004, 0.004), 0, 0.274, 0.228));
-  // front vent grille
   for (let i = 0; i < 7; i++) slits.push(placed(new THREE.BoxGeometry(0.12, 0.004, 0.004), 0, 0.05 + i * 0.012, 0.225));
   tower.add(new THREE.Mesh(merge(slits), dark));
   const slot = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.02, 0.01), dark);
@@ -730,6 +609,7 @@ export function buildRoom(scene: THREE.Scene, phys: Physics): RoomRefs {
   const power = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.01, 20), mat('#cfc8b2', 0.5));
   power.rotation.x = Math.PI / 2;
   power.position.set(0, 0.19, 0.226);
+  power.name = 'pc-power';
   tower.add(power);
   const ledG = mat('#0a200d', 0.3, 0, { emissive: '#39ff6a', emissiveIntensity: 5 });
   const ledA = mat('#201405', 0.3, 0, { emissive: '#ffae2b', emissiveIntensity: 5 });
@@ -746,23 +626,23 @@ export function buildRoom(scene: THREE.Scene, phys: Physics): RoomRefs {
   const pcBadge = new THREE.Mesh(new THREE.PlaneGeometry(0.06, 0.014), mat('#ffffff', 0.4, 0.3, { map: labelTex('CRUSTCO 486', '#8f8a78', '#e8e2cc', 256, 60, 30) }));
   pcBadge.position.set(0, 0.13, 0.2245);
   tower.add(pcBadge);
-  // rear fan grille
   const fanGrille = new THREE.Mesh(new THREE.RingGeometry(0.02, 0.045, 24, 3), dark);
   fanGrille.position.set(0, 0.32, -0.2205);
   fanGrille.rotation.y = Math.PI;
   tower.add(fanGrille);
   scene.add(shadowed(tower));
-  const towerBody = phys.createBody({ pos: { x: 0.95, y: 0, z: -hz + 0.35 }, angularDamping: 0.5 });
-  phys.addCollider(towerBody, R.ColliderDesc.cuboid(0.1, 0.21, 0.22).setTranslation(0, 0.21, 0), { density: 120 });
-  const pc = phys.track(tower, towerBody, 'pc', 'pc', { restitution: 0.1, friction: 0.8, density: 120 });
+  const towerBody = phys.createBody({ pos: { x: dX + DESK.w / 2 + 0.22, y: 0.003, z: z0 + 0.36 }, angularDamping: 1, linearDamping: 0.5 });
+  phys.addCollider(towerBody, R.ColliderDesc.cuboid(0.1, 0.21, 0.22).setTranslation(0, 0.21, 0), { density: 120, friction: 0.9, restitution: 0.05 });
+  const pc = phys.track(tower, towerBody, 'pc', 'pc', { restitution: 0.05, friction: 0.9, density: 120 });
 
   // ------------------------------------------------------------ cables
   const cableM = mat('#1c1c1c', 0.55);
   cableM.userData.noSkin = true;
   const vgaM = mat('#bdb59d', 0.6);
   vgaM.userData.noSkin = true;
+  const outletX = dX + 1.25;
   const outletAnchor = new THREE.Object3D();
-  outletAnchor.position.set(1.35, 0.3, -hz + 0.01);
+  outletAnchor.position.set(outletX, 0.3, z0 + 0.01);
   scene.add(outletAnchor);
   const cables = [
     new Cable(mon.group, new THREE.Vector3(0.05, 0.28, -0.3), tower, new THREE.Vector3(-0.03, 0.34, -0.22), vgaM, 0.0065),
@@ -815,18 +695,18 @@ export function buildRoom(scene: THREE.Scene, phys: Physics): RoomRefs {
   chair.add(new THREE.Mesh(merge(baseParts), plastic));
   chair.add(new THREE.Mesh(merge(casterParts), mat('#111214', 0.4)));
   scene.add(shadowed(chair));
-  const chairBody = phys.createBody({ pos: { x: -0.1, y: 0, z: -hz + 1.15 }, angularDamping: 0.8 });
-  phys.addCollider(chairBody, R.ColliderDesc.cylinder(0.02, 0.3).setTranslation(0, 0.04, 0), { density: 600, friction: 0.5 });
-  phys.addCollider(chairBody, R.ColliderDesc.cuboid(0.24, 0.04, 0.23).setTranslation(0, 0.48, 0), { density: 200 });
-  phys.addCollider(chairBody, R.ColliderDesc.cuboid(0.23, 0.27, 0.035).setTranslation(0, 0.8, 0.22), { density: 150 });
-  phys.addCollider(chairBody, R.ColliderDesc.cylinder(0.2, 0.025).setTranslation(0, 0.24, 0), { density: 300 });
-  const chairObj = phys.track(chair, chairBody, 'chair', 'props', { restitution: 0.1, friction: 0.5, density: 200 });
+  const chairBody = phys.createBody({ pos: { x: dX, y: 0.003, z: dZ + 0.95 }, angularDamping: 1.2, linearDamping: 0.6 });
+  phys.addCollider(chairBody, R.ColliderDesc.cylinder(0.025, 0.3).setTranslation(0, 0.045, 0), { density: 700, friction: 0.6, restitution: 0.05 });
+  phys.addCollider(chairBody, R.ColliderDesc.cuboid(0.24, 0.04, 0.23).setTranslation(0, 0.48, 0), { density: 160, restitution: 0.05 });
+  phys.addCollider(chairBody, R.ColliderDesc.cuboid(0.23, 0.27, 0.035).setTranslation(0, 0.8, 0.22), { density: 120, restitution: 0.05 });
+  phys.addCollider(chairBody, R.ColliderDesc.cylinder(0.2, 0.025).setTranslation(0, 0.24, 0), { density: 300, restitution: 0.05 });
+  const chairObj = phys.track(chair, chairBody, 'chair', 'props', { restitution: 0.05, friction: 0.6, density: 160 });
 
   // ------------------------------------------------------------ door (hinged, opens to the garage) + frame + teaser sign
   const doorM = mat('#ece6d8', 0.42);
   const doorPivot = new THREE.Group();
   doorPivot.name = 'bedroom-door';
-  doorPivot.position.set(dl, 0, hz - 0.03);
+  doorPivot.position.set(dl, 0, z1 - 0.03);
   scene.add(doorPivot);
   const door = rbox(0.9, 2.05, 0.05, 0.01, doorM);
   door.position.set(DOOR.w / 2, 1.025, 0);
@@ -836,9 +716,9 @@ export function buildRoom(scene: THREE.Scene, phys: Physics): RoomRefs {
     for (const px of [-0.2, 0.2]) panels.push(placed(new RoundedBoxGeometry(0.3, ph, 0.012, 2, 0.005), DOOR.w / 2 + px, py, -0.028));
   doorPivot.add(shadowed(new THREE.Mesh(merge(panels), doorM)));
   const doorCasing = merge([
-    placed(new RoundedBoxGeometry(0.08, 2.12, 0.025, 2, 0.006), DOOR.x - 0.49, 1.06, hz - 0.012),
-    placed(new RoundedBoxGeometry(0.08, 2.12, 0.025, 2, 0.006), DOOR.x + 0.49, 1.06, hz - 0.012),
-    placed(new RoundedBoxGeometry(1.06, 0.09, 0.025, 2, 0.006), DOOR.x, 2.13, hz - 0.012),
+    placed(new RoundedBoxGeometry(0.08, 2.12, 0.025, 2, 0.006), DOOR.x - 0.49, 1.06, z1 - 0.012),
+    placed(new RoundedBoxGeometry(0.08, 2.12, 0.025, 2, 0.006), DOOR.x + 0.49, 1.06, z1 - 0.012),
+    placed(new RoundedBoxGeometry(1.06, 0.09, 0.025, 2, 0.006), DOOR.x, 2.13, z1 - 0.012),
   ]);
   scene.add(shadowed(new THREE.Mesh(doorCasing, trimM)));
   const knob = new THREE.Mesh(new THREE.SphereGeometry(0.03, 20, 14), mat('#c9a24a', 0.25, 1));
@@ -849,57 +729,37 @@ export function buildRoom(scene: THREE.Scene, phys: Physics): RoomRefs {
   garageSign.rotation.y = Math.PI;
   doorPivot.add(garageSign);
 
-  // Light switch + power outlet
+  // Light switch (toggles the ceiling lamp) + power outlet
   const plateM = mat('#f6f4ee', 0.35);
+  const switchX = dl - 0.3;
   const switchPlate = rbox(0.075, 0.12, 0.008, 0.003, plateM);
-  switchPlate.position.set(1.0, 1.15, hz - 0.004);
+  switchPlate.position.set(switchX, 1.15, z1 - 0.004);
   scene.add(switchPlate);
   const toggle = rbox(0.016, 0.03, 0.014, 0.004, plateM);
-  toggle.position.set(1.0, 1.155, hz - 0.012);
+  toggle.position.set(switchX, 1.155, z1 - 0.012);
   toggle.rotation.x = 0.25;
+  toggle.name = 'light-switch';
   scene.add(toggle);
   const outlet = rbox(0.075, 0.12, 0.008, 0.003, plateM);
-  outlet.position.set(1.35, 0.3, -hz + 0.004);
+  outlet.position.set(outletX, 0.3, z0 + 0.004);
   scene.add(outlet);
   const holes: THREE.BufferGeometry[] = [];
   for (const oy of [0.325, 0.27]) {
-    holes.push(placed(new THREE.CircleGeometry(0.004, 8), 1.343, oy, -hz + 0.0085));
-    holes.push(placed(new THREE.CircleGeometry(0.004, 8), 1.357, oy, -hz + 0.0085));
+    holes.push(placed(new THREE.CircleGeometry(0.004, 8), outletX - 0.007, oy, z0 + 0.0085));
+    holes.push(placed(new THREE.CircleGeometry(0.004, 8), outletX + 0.007, oy, z0 + 0.0085));
   }
   scene.add(new THREE.Mesh(merge(holes), dark));
 
-  // ------------------------------------------------------------ poster, shelf, clock (static)
+  // ------------------------------------------------------------ poster, clock (static)
   const poster = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.7), mat('#ffffff', 0.7, 0, { map: posterTex('GRIND', '#1d3557', '#ffd166') }));
-  poster.position.set(-1.2, 1.7, -hz + 0.013);
+  poster.position.set(dX, 1.92, z0 + 0.013);
   scene.add(poster);
   const pframe = rbox(0.54, 0.74, 0.015, 0.004, mat('#18181a', 0.45));
-  pframe.position.set(-1.2, 1.7, -hz + 0.004);
+  pframe.position.set(dX, 1.92, z0 + 0.004);
   scene.add(shadowed(pframe));
-  const shelfWood = woodGrain([30, 30, 70], 17);
-  const shelf = rbox(0.9, 0.03, 0.22, 0.005, mat('#ffffff', 0.5, 0, { map: shelfWood.map, normalMap: shelfWood.normal }));
-  shelf.position.set(1.2, 1.5, -hz + 0.11);
-  scene.add(shadowed(shelf));
-  for (const bx of [0.85, 1.55]) {
-    const bracket = merge([placed(new THREE.BoxGeometry(0.02, 0.16, 0.012), bx, 1.405, -hz + 0.006), placed(new THREE.BoxGeometry(0.02, 0.012, 0.18), bx, 1.479, -hz + 0.09)]);
-    scene.add(shadowed(new THREE.Mesh(bracket, metal)));
-  }
-  phys.staticBox({ x: 0.45, y: 0.015, z: 0.11 }, { x: 1.2, y: 1.5, z: -hz + 0.11 });
-  const books = ['#a23b3b', '#3b6aa2', '#e0b040', '#4b8b4b', '#7a4ba2', '#d6cdb4'];
-  const br = rand(77);
-  books.forEach((c, i) => {
-    const bh = 0.2 + br() * 0.06;
-    const b = rbox(0.035 + br() * 0.015, bh, 0.15 + br() * 0.03, 0.004, mat(c, 0.75));
-    const lean = i === books.length - 1 ? -0.35 : 0;
-    b.position.set(0.82 + i * 0.048 + (lean ? 0.03 : 0), 1.515 + bh / 2 - (lean ? 0.012 : 0), -hz + 0.11);
-    b.rotation.z = lean;
-    scene.add(shadowed(b));
-  });
-  // Wall clock showing the real time
   const clock = new THREE.Group();
-  const face = new THREE.Mesh(new THREE.CircleGeometry(0.15, 40), mat('#ffffff', 0.5, 0, { map: clockFace() }));
-  clock.add(face);
-  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.155, 0.009, 10, 48), mat('#5a3d26', 0.45, 0.1));
-  clock.add(rim);
+  clock.add(new THREE.Mesh(new THREE.CircleGeometry(0.15, 40), mat('#ffffff', 0.5, 0, { map: clockFace() })));
+  clock.add(new THREE.Mesh(new THREE.TorusGeometry(0.155, 0.009, 10, 48), mat('#5a3d26', 0.45, 0.1)));
   const handM = mat('#1a1a1a', 0.4);
   const mkHand = (len: number, w: number, z: number, m: THREE.Material) => {
     const p = new THREE.Group();
@@ -913,7 +773,7 @@ export function buildRoom(scene: THREE.Scene, phys: Physics): RoomRefs {
   const hourH = mkHand(0.08, 0.012, 0.006, handM);
   const minH = mkHand(0.12, 0.008, 0.01, handM);
   const secH = mkHand(0.13, 0.003, 0.014, mat('#b3261e', 0.4));
-  clock.position.set(-1.3, 1.95, hz - 0.02);
+  clock.position.set(-2.4, 1.95, z1 - 0.02);
   clock.rotation.y = Math.PI;
   scene.add(shadowed(clock));
 
@@ -924,12 +784,20 @@ export function buildRoom(scene: THREE.Scene, phys: Physics): RoomRefs {
     pc,
     monitor,
     chair: chairObj,
+    bed: bedF.obj,
+    furniture: { bed: bedF.obj, nightstand: nightF.obj, table: tableF.obj, bookcase: caseF.obj, dresser: dresserF.obj },
+    drawers: [...deskF.drawers, ...nightF.drawers, ...dresserF.drawers],
     screen: { mesh: mon.screen, obj: monitor, w: 0.52, h: 0.36 },
     garageSign,
     door: doorPivot,
     deskTopY,
     sky: skyMat,
     glass,
+    pane,
+    windowGroup: win,
+    curtains,
+    lightToggle: toggle,
+    powerButton: power,
     update(dt: number) {
       for (const c of cables) c.update();
       clockT += dt;
@@ -943,7 +811,6 @@ export function buildRoom(scene: THREE.Scene, phys: Physics): RoomRefs {
         minH.rotation.z = -(m / 60) * Math.PI * 2;
         hourH.rotation.z = -(hr / 12) * Math.PI * 2;
       }
-      // HDD activity flicker
       blinkT.t -= dt;
       if (blinkT.t <= 0) {
         blinkT.t = 0.05 + Math.random() * 0.4;

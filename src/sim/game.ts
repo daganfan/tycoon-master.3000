@@ -10,6 +10,7 @@ import { TYCOONS, tycoonById } from './tycoons';
 import { createRuntime, upgradeCost, xpForLevel } from './tycoons/framework';
 import { BASE_STATS, createInitialState } from './state';
 import { GarageSim, type PayoutSource } from './garage/factory';
+import { Achievements, type WorldEvent } from './achievements';
 import type {
   ChaosInfo, ChaosKind, CosmeticTarget, GameState, Phase, TokenCost, TokenId, TycoonCtx, TycoonDef, TycoonRuntime,
 } from './types';
@@ -31,6 +32,9 @@ export interface GameEvents extends Record<string, unknown> {
   garagePad: { id: string };
   garagePayout: { amount: Num; source: PayoutSource };
   garageRebirth: { stars: number };
+  /** Something happened in the 3D world (tidy, window broken, light switch...). */
+  world: WorldEvent;
+  achievement: { id: string; name: string; icon: string; secret: boolean };
 }
 
 /** Base Chaos Meter points per unit of magnitude, and the cap for a single event. */
@@ -52,6 +56,8 @@ export class Game {
   readonly rng: Rng;
   /** Phase 2: the physical factory in the garage. */
   readonly garage = new GarageSim(this);
+  /** Trophies (src/content/achievements.ts). */
+  readonly achievements: Achievements;
   /** Which tycoon the player is currently focused on (runtime only). */
   focused: string | null = null;
   private ctxCache = new Map<string, TycoonCtx>();
@@ -64,6 +70,8 @@ export class Game {
 
   constructor(public state: GameState = createInitialState()) {
     this.rng = new Rng(state.rngState);
+    state.achievements ??= [];
+    this.achievements = new Achievements(this);
     if (!state.tycoons.lemon_mogul) {
       const rt = createRuntime(tycoonById('lemon_mogul'), this.rng);
       rt.installed = true;
@@ -153,6 +161,7 @@ export class Game {
       }
     }
     this.garage.tick(dt);
+    this.achievements.tick(dt);
     this.checkLevels();
     this.checkQuests();
     s.rngState = this.rng.state;
@@ -347,6 +356,7 @@ export class Game {
   canBuyItem(id: string): boolean {
     const def = itemById(id);
     if (!def || !this.phaseOpen(def.phase)) return false;
+    if (def.needsFlag && !this.state.flags.includes(def.needsFlag)) return false;
     return (this.state.items[id] ?? 0) < def.max && this.state.cash.gte(this.itemCost(id));
   }
 
