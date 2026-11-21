@@ -268,7 +268,13 @@ export function spawnToy(kind: string, from: THREE.Vector3, dir: THREE.Vector3, 
   }
   scene.add(shadowed(g));
   const body = phys.createBody({ pos: from, ccd: true, angularDamping: 0.3 });
-  phys.addCollider(body, collider, { density: 200, restitution: kind === 'duck' ? 0.7 : 0.2 });
+  phys.addCollider(body, collider, { density: 200, restitution: kind === 'duck' ? 0.35 : 0.15 });
+  // Toys never collide with each other (a pile of ducks would jitter forever) and
+  // settle quickly. They still land on floors/furniture and bounce off the player.
+  // Groups: membership 0x0002 ("toy"), filter = everything except toys.
+  body.collider(0).setCollisionGroups((0x0002 << 16) | 0xfffd);
+  body.setLinearDamping(0.6);
+  body.setAngularDamping(1.5);
   // Pop out gently: enough to be funny, not enough to bulldoze the desk.
   body.setLinvel({ x: dir.x * 1.2 + (Math.random() - 0.5) * 0.4, y: 0.8 + Math.random() * 0.4, z: dir.z * 1.2 + (Math.random() - 0.5) * 0.4 }, true);
   return phys.track(g, body, kind, 'props', { restitution: kind === 'duck' ? 0.7 : 0.2, friction: 0.6, density: 200 });

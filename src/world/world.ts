@@ -132,7 +132,7 @@ export class World {
   /** Crosshair targeting for grab/carry. */
   aimProp(): { obj: PhysObj; point: THREE.Vector3 } | null {
     const a = this.aim;
-    return a && a.kind !== 'door' && a.obj.kind !== 'avatar' && a.obj.body.isDynamic() && a.dist <= GRAB_REACH ? { obj: a.obj, point: a.point } : null;
+    return a && a.kind !== 'door' && a.obj.kind !== 'avatar' && (a.obj.body.isDynamic() || !!a.obj.frozen) && a.dist <= GRAB_REACH ? { obj: a.obj, point: a.point } : null;
   }
 
   /** First person: carried things float in front of your eyes, following the view pitch. */

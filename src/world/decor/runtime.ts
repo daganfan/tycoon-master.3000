@@ -42,6 +42,8 @@ export function registerDecor(obj: PhysObj, fx: Behavior[], opts: { light?: THRE
     hauntT: 3 + Math.random() * 6, singT: 0, roamTurn: 0,
   };
   for (const f of fx) if ('node' in f && f.node) e.base.set(f.node, { p: f.node.position.clone(), r: f.node.rotation.clone(), s: f.node.scale.clone() });
+  // Roaming / haunted decor moves on purpose, so the freeze system leaves it alone.
+  if (fx.some((f) => f.k === 'haunt')) e.obj.noFreeze = true;
   live.push(e);
   applyGravity(e, 1);
 }

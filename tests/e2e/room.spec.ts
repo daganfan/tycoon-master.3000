@@ -137,6 +137,7 @@ test('room: tidy after a knocked-over desk with ducks, coins and the player in t
     const step = (n: number) => { for (let i = 0; i < n; i++) { w.update(1 / 60); if (i % 6 === 0) g.tick(0.1); } };
     step(240);
     const d = w.room.desk; const h = d.home.pos; const V = w.avatar.position.constructor;
+    (w as unknown as { phys: { unfreeze(o: Obj): void } }).phys.unfreeze(d); // a real knock always wakes it first
     d.body.setTranslation({ x: h.x + 1.2, y: 0.6, z: h.z + 1.0 }, true);
     d.body.setRotation({ x: 0.5, y: 0, z: 0.5, w: 0.7 }, true);
     for (let i = 0; i < 8; i++) g.bus.emit('spawn', { kind: 'duck', tycoonId: 'lemon_mogul' });
@@ -158,5 +159,41 @@ test('room: tidy after a knocked-over desk with ducks, coins and the player in t
   });
   expect(r.deskOff).toBeLessThan(0.02);
   expect(r.displaced).toEqual([]);
+  expect(r.ducks).toBe(0);
+});
+
+// Resting things are frozen: idling and escaped ducks must not move anything at all.
+test('room: resting furniture is frozen; idling and a duck rain move nothing', async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.goto('/?fresh&gfx=low');
+  await page.waitForFunction(() => !!(window as unknown as { __tm?: unknown }).__tm, null, { timeout: 60_000 });
+  const r = await page.evaluate(() => {
+    type V3 = { x: number; y: number; z: number };
+    type Obj = { id?: string; kind: string; frozen?: boolean; body: { translation(): V3; setTranslation(v: V3, w: boolean): void } };
+    const tm = (window as unknown as { __tm: { game: { setFlag(f: string): void; buyItem(id: string): boolean; tick(dt: number): void; state: { cash: { add(n: number): unknown } }; bus: { emit(t: string, p: unknown): void } }; world: { gfx: { render: () => void }; update(dt: number): void; phys: { objs: Obj[] }; avatar: { body: Obj['body'] }; room: { desk: { home: { pos: V3 } } } } } }).__tm;
+    const { game: g, world: w } = tm;
+    (g.state as { cash: unknown }).cash = g.state.cash.add(1e6);
+    g.setFlag('booted');
+    for (const id of ['used_monitor', 'mech_keyboard', 'lava_lamp', 'cardboard_boxes', 'cardboard_boxes']) g.buyItem(id);
+    w.gfx.render = () => {};
+    const step = (n: number) => { for (let i = 0; i < n; i++) { w.update(1 / 60); if (i % 6 === 0) g.tick(0.1); } };
+    const ids = () => w.phys.objs.filter((o) => o.id);
+    const snap = () => new Map(ids().map((o) => [o.id!, o.body.translation()] as const));
+    const moved = (a: Map<string, V3>) => Math.max(0, ...ids().map((o) => { const p = a.get(o.id!)!; const q = o.body.translation(); return Math.hypot(p.x - q.x, p.y - q.y, p.z - q.z); }));
+    step(300);
+    const frozen = ids().filter((o) => o.frozen).length;
+    const h = w.room.desk.home.pos;
+    w.avatar.body.setTranslation({ x: h.x + 2.5, y: 1, z: h.z + 2.5 }, true);
+    step(30);
+    const a = snap();
+    step(1800);
+    const idle = moved(a);
+    const b = snap();
+    for (let i = 0; i < 20; i++) g.bus.emit('spawn', { kind: 'duck', tycoonId: 'lemon_mogul' });
+    step(600);
+    return { frozen, total: ids().length, idle, ducks: moved(b) };
+  });
+  expect(r.frozen).toBe(r.total);
+  expect(r.idle).toBe(0);
   expect(r.ducks).toBe(0);
 });

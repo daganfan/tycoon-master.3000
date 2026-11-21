@@ -194,6 +194,9 @@ export class CosmeticFx {
       if (this.hauntT <= 0) {
         this.hauntT = 1.5 + Math.random() * 3;
         const o = this.haunted[Math.floor(Math.random() * this.haunted.length)]!;
+        // Haunted things move on purpose: never keep them frozen.
+        o.noFreeze = true;
+        if (o.frozen) this.host.phys.unfreeze(o);
         if (o.body.isDynamic()) {
           const m = o.body.mass();
           const a = Math.random() * Math.PI * 2;

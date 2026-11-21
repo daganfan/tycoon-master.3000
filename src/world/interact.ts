@@ -12,8 +12,6 @@ import { deliberatePlacement, settleVerdict, tidyOrder, TIDY_COOLDOWN, type Tidy
 /** What the interaction system needs from the world (kept small to avoid tight coupling). */
 /** Seconds landed furniture stays frozen while the physics re-finds its contacts. */
 const LAND_DELAY = 0.12;
-/** Seconds landed objects may not fall asleep (Rapier drops a sleeping body's floor contact). */
-const KEEP_AWAKE = 1.5;
 
 export interface InteractHost {
   readonly game: Game;
@@ -89,8 +87,6 @@ export class Interact {
   private tidyBatch: { objs: PhysObj[]; left: number; start: number } | null = null;
   /** Objects that landed and are waiting (kinematic) for their contacts to be found. */
   private landing: { objs: PhysObj[]; at: number } | null = null;
-  /** Just-landed objects are kept awake for a moment so they can't sleep through their floor contact. */
-  private keepAwake: { objs: PhysObj[]; until: number } | null = null;
   private tidyReadyAt = 0;
   private savedGroups = new Map<number, number>();
   /** Called when the player deliberately sets something down at a new home (for achievements). */
@@ -106,7 +102,7 @@ export class Interact {
   }
 
   private grabbable(): PhysObj[] {
-    return this.w.phys.objs.filter((o) => o.kind !== 'avatar' && o.body.isDynamic());
+    return this.w.phys.objs.filter((o) => o.kind !== 'avatar' && (o.body.isDynamic() || o.frozen));
   }
 
   /** Give an object a stable id and restore its saved pose (if any). */
@@ -294,19 +290,15 @@ export class Interact {
     for (const o of l.objs) {
       if (!this.w.phys.objs.includes(o)) continue;
       const b = o.body;
-      b.setBodyType(R.RigidBodyType.Dynamic, true);
-      b.setTranslation(o.home.pos, true);
-      b.setRotation(o.home.quat, true);
-      b.setLinvel({ x: 0, y: 0, z: 0 }, true);
-      b.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      // Land FROZEN exactly on the home pose: a fixed body has no physics to
+      // resolve, so nothing can sink, jump or slide afterwards. Touching it later
+      // (walking into it, grabbing it) wakes it up as a normal object.
+      b.setBodyType(R.RigidBodyType.Dynamic, false);
+      b.setTranslation(o.home.pos, false);
+      b.setRotation(o.home.quat, false);
       this.w.phys.sync(o);
+      this.w.phys.freeze(o);
     }
-    this.keepAwake = { objs: l.objs, until: this.now + KEEP_AWAKE };
-    // Do NOT force sleep() here: a body put to sleep in the same step it turns
-    // dynamic loses its floor contact and sinks through the floor (then the
-    // out-of-bounds rescue snaps it back — that was the "desk jumps" bug).
-    // They are still and exactly on their resting poses; the engine puts them
-    // to sleep by itself a moment later.
   }
 
   /* ------------------------------------------------------------ queries */
@@ -383,6 +375,8 @@ export class Interact {
   /* ------------------------------------------------------------ grab */
 
   private grab(o: PhysObj, point: THREE.Vector3Like, byMouse: boolean): void {
+    this.w.phys.unfreeze(o);
+    this.w.phys.heldObj = o;
     const inv = rot(o).invert();
     const local = v3(point).sub(v3(o.body.translation())).applyQuaternion(inv);
     // Grabbing by the centre for G keeps things stable; mouse grabs keep the exact point so they swing.
@@ -400,6 +394,7 @@ export class Interact {
     const h = this.held;
     if (!h) return;
     this.held = null;
+    this.w.phys.heldObj = null;
     const b = h.obj.body;
     b.setAngularDamping(h.damping);
     const v0 = b.linvel();
@@ -498,6 +493,9 @@ export class Interact {
   }
 
   private tweenTo(o: PhysObj, to: { pos: THREE.Vector3; quat: THREE.Quaternion }, dur: number, delay: number, arc: number, batch = false): void {
+    // No cascade: things resting on a piece flying home must stay frozen in place
+    // (it lands back under them), not drop through it while its collisions are off.
+    this.w.phys.unfreeze(o, false);
     this.tweens = this.tweens.filter((t) => t.obj !== o);
     const R = this.w.phys.R;
     o.body.setBodyType(R.RigidBodyType.KinematicPositionBased, true);
@@ -617,10 +615,6 @@ export class Interact {
     this.updateHeld(dt);
     this.updateTweens(dt);
     if (this.landing && this.now >= this.landing.at) this.completeLanding();
-    if (this.keepAwake) {
-      if (this.now > this.keepAwake.until) this.keepAwake = null;
-      else for (const o of this.keepAwake.objs) if (o.body.isSleeping()) o.body.wakeUp();
-    }
     // Safety net: a batch that somehow lost a member still lands.
     if (this.tidyBatch && this.now - this.tidyBatch.start > 5) {
       this.tweens = this.tweens.filter((t) => !t.batch);

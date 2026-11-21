@@ -42,6 +42,15 @@ export interface PhysObj {
   patches?: PhysicsPatch[];
   /** Base damping, before the comfort setting is applied. */
   damping?: { lin: number; ang: number };
+  /**
+   * Frozen: resting furniture/props become FIXED bodies, so they cannot jitter,
+   * creep, sink or jump on their own. Only touching wakes them (see Physics.update).
+   */
+  frozen?: boolean;
+  /** World-space box while frozen (cached: a frozen object never moves). */
+  frozenBox?: THREE.Box3;
+  /** Moves on purpose (roaming/haunted decor): never frozen, and doesn't wake others. */
+  noFreeze?: boolean;
 }
 
 export interface BodyOpts {
@@ -220,6 +229,10 @@ export class Physics {
    */
   calmFor = 0;
   calmExempt: RAPIER.RigidBody | null = null;
+  /** Other players' physics proxies (multiplayer host): they wake frozen things like the avatar does. */
+  readonly pushers = new Set<RAPIER.RigidBody>();
+  /** The object the player is carrying: never frozen, always wakes what it touches. */
+  heldObj: PhysObj | null = null;
 
   update(dt: number, maxSteps = 4): number {
     this.acc += dt;
@@ -234,6 +247,7 @@ export class Physics {
       steps++;
     }
     if (steps === maxSteps) this.acc = 0;
+    if (steps) this.wakeTouched();
     for (const o of this.objs) this.sync(o);
     if (steps) this.nap(steps * this.step);
     return steps;
@@ -257,10 +271,89 @@ export class Physics {
     });
   }
 
+  /* ------------------------------------------------------------ freezing */
+
+  private canFreeze(o: PhysObj): boolean {
+    // Room furniture and bought props (they have a stable id). Toys, the avatar and
+    // self-moving decor stay normal dynamic bodies.
+    return !!o.id && o.kind !== 'avatar' && !o.noFreeze && o !== this.heldObj;
+  }
+
+  /** Turn a resting object into a fixed body: it now cannot move by itself at all. */
+  freeze(o: PhysObj): void {
+    if (o.frozen || !o.body.isDynamic()) return;
+    o.body.setLinvel({ x: 0, y: 0, z: 0 }, false);
+    o.body.setAngvel({ x: 0, y: 0, z: 0 }, false);
+    o.body.setBodyType(this.R.RigidBodyType.Fixed, false);
+    o.frozen = true;
+    this.sync(o);
+    o.frozenBox = new THREE.Box3().setFromObject(o.mesh);
+    this.still.delete(o.body);
+  }
+
+  /** Something touched it: back to a normal dynamic body (plus whatever rests on it). */
+  unfreeze(o: PhysObj, cascade = true): void {
+    if (!o.frozen) return;
+    const box = o.frozenBox;
+    o.frozen = false;
+    o.frozenBox = undefined;
+    o.body.setBodyType(this.R.RigidBodyType.Dynamic, true);
+    o.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    o.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    this.still.set(o.body, 0);
+    if (!cascade || !box) return;
+    // Things sitting on it must be able to fall/slide with it instead of floating.
+    const probe = box.clone().expandByScalar(0.04);
+    for (const other of this.objs) {
+      if (!other.frozen || !other.frozenBox) continue;
+      if (other.frozenBox.min.y >= box.min.y + 0.05 && other.frozenBox.intersectsBox(probe)) this.unfreeze(other, true);
+    }
+  }
+
+  /** Wake every frozen object whose box touches `box`. */
+  private wakeIn(box: THREE.Box3): void {
+    for (const o of this.objs) if (o.frozen && o.frozenBox?.intersectsBox(box)) this.unfreeze(o);
+  }
+
+  private readonly tmpBox = new THREE.Box3();
+  private readonly tmpMin = new THREE.Vector3();
+  private readonly tmpMax = new THREE.Vector3();
+
+  /**
+   * Only "touching" wakes frozen things: the player (and other players' proxies),
+   * what the player carries, and objects already moving because the player moved
+   * them. Coins, escaped toys and self-moving decor bounce off frozen things.
+   */
+  private wakeTouched(): void {
+    const bodyBox = (b: RAPIER.RigidBody, hx: number, hy: number, hz: number): THREE.Box3 => {
+      const t = b.translation();
+      this.tmpMin.set(t.x - hx, t.y - hy, t.z - hz);
+      this.tmpMax.set(t.x + hx, t.y + hy, t.z + hz);
+      return this.tmpBox.set(this.tmpMin, this.tmpMax);
+    };
+    for (const o of this.objs) {
+      if (o.frozen || o.noFreeze) continue;
+      if (o.kind === 'avatar') {
+        this.wakeIn(bodyBox(o.body, 0.33, 0.8, 0.33));
+        continue;
+      }
+      if (!o.id && o !== this.heldObj) continue; // toys never wake anything
+      const v = o.body.linvel();
+      if (o !== this.heldObj && Math.abs(v.x) + Math.abs(v.y) + Math.abs(v.z) < 0.4) continue;
+      this.wakeIn(this.tmpBox.setFromObject(o.mesh).expandByScalar(0.03));
+    }
+    for (const b of this.pushers) this.wakeIn(bodyBox(b, 0.38, 0.8, 0.38));
+  }
+
   /** Put bodies that have barely moved for a while to sleep, so stacks stop creeping. */
   private nap(dt: number): void {
     for (const o of this.objs) {
       const b = o.body;
+      // Already asleep and allowed to freeze: it is at rest, freeze it now.
+      if (b.isDynamic() && b.isSleeping() && this.canFreeze(o)) {
+        this.freeze(o);
+        continue;
+      }
       if (o.kind === 'avatar' || !b.isDynamic() || b.isSleeping()) {
         // Reset while frozen/asleep: a body that was still before being carried or
         // tidied must not be put to sleep the very step it turns dynamic again —
@@ -276,7 +369,10 @@ export class Physics {
       }
       const t = (this.still.get(b) ?? 0) + dt;
       this.still.set(b, t);
-      if (t > NAP_AFTER) b.sleep();
+      if (t > NAP_AFTER) {
+        if (this.canFreeze(o)) this.freeze(o);
+        else b.sleep();
+      }
     }
   }
 
