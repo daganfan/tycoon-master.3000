@@ -75,8 +75,7 @@ export class Lighting {
   private time = 0;
   private cycleT = 99;
   private glowT = 0;
-  private readonly sample = document.createElement('canvas');
-  private readonly sampleCtx: CanvasRenderingContext2D | null;
+  private readonly beam: THREE.Mesh;
   private readonly tmpColor = new THREE.Color();
   private readonly glowTarget = new THREE.Color('#9fd4ff');
   private glowLevel = 0.5;
@@ -87,8 +86,11 @@ export class Lighting {
     private readonly scene: THREE.Scene,
     private readonly gfx: Graphics,
     private readonly room: RoomRefs,
-    private readonly screenCanvas: () => HTMLCanvasElement | undefined,
+    /** Average colour of the main screen (sRGB 0..1), read back asynchronously; null = unknown. */
+    private readonly screenColor: () => THREE.Color | null,
   ) {
+    // These stay real lights; decor/prop point lights go through the pool (perf.ts).
+    for (const l of [this.lamp, this.bounce, this.glow]) l.userData.realLight = true;
     const r = gfx.renderer;
     const pmrem = new THREE.PMREMGenerator(r);
     const envScene = new RoomEnvironment();
@@ -141,8 +143,6 @@ export class Lighting {
     // Screen glow (follows the monitor).
     this.glow.position.set(0, 0, 0.35);
     this.room.screen.mesh.add(this.glow);
-    this.sampleCtx = this.sample.getContext('2d', { willReadFrequently: true });
-    this.sample.width = this.sample.height = 4;
 
     // Light shaft + dust motes.
     const beamGeo = this.beamGeometry();
@@ -155,7 +155,7 @@ export class Lighting {
       side: THREE.DoubleSide,
     });
     keepAlpha(this.beamMat, THREE.OneFactor);
-    const beam = new THREE.Mesh(beamGeo, this.beamMat);
+    const beam = (this.beam = new THREE.Mesh(beamGeo, this.beamMat));
     beam.renderOrder = 5;
     beam.userData.noAO = true;
     beam.frustumCulled = false;
@@ -193,6 +193,7 @@ export class Lighting {
       this.lamp.shadow.map = null;
       this.dust.geometry.setDrawRange(0, p.dust);
       this.dust.visible = p.dust > 0;
+      this.beam.visible = p.beam;
     });
     gfx.onFrame.push((dt) => this.update(dt));
   }
@@ -313,29 +314,17 @@ export class Lighting {
     this.dustMat.uniforms.strength!.value = 0.08 + 0.35 * day;
   }
 
+  /**
+   * Screen glow colour. The world reads the screen texture's 1x1 mip back
+   * asynchronously (no canvas readback stall on the main thread).
+   */
   private sampleScreen(): void {
-    const c = this.screenCanvas();
-    const g = this.sampleCtx;
-    if (!c || !g) return;
-    try {
-      g.drawImage(c, 0, 0, 4, 4);
-      const d = g.getImageData(0, 0, 4, 4).data;
-      let rr = 0;
-      let gg = 0;
-      let bb = 0;
-      for (let i = 0; i < 64; i += 4) {
-        rr += d[i]!;
-        gg += d[i + 1]!;
-        bb += d[i + 2]!;
-      }
-      const n = 16 * 255;
-      this.glowTarget.setRGB(rr / n, gg / n, bb / n, THREE.SRGBColorSpace);
-      const lum = this.glowTarget.r * 0.3 + this.glowTarget.g * 0.6 + this.glowTarget.b * 0.1;
-      this.glowLevelTarget = Math.min(1, lum * 3);
-      if (lum > 0.001) this.glowTarget.multiplyScalar(1 / Math.max(this.glowTarget.r, this.glowTarget.g, this.glowTarget.b));
-    } catch {
-      /* canvas not readable: keep the last colour */
-    }
+    const c = this.screenColor();
+    if (!c) return;
+    this.glowTarget.setRGB(c.r, c.g, c.b, THREE.SRGBColorSpace);
+    const lum = this.glowTarget.r * 0.3 + this.glowTarget.g * 0.6 + this.glowTarget.b * 0.1;
+    this.glowLevelTarget = Math.min(1, lum * 3);
+    if (lum > 0.001) this.glowTarget.multiplyScalar(1 / Math.max(this.glowTarget.r, this.glowTarget.g, this.glowTarget.b));
   }
 
   update(dt: number): void {

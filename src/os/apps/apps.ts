@@ -14,6 +14,7 @@ import { VIEWS } from './views';
 import { junkMart } from './junkmart';
 import { netplay } from './netplay'; // multiplayer (src/net)
 import { trophies } from './trophies';
+import { perfOverlayEnabled, setPerfOverlay } from '@/world/perfOverlay';
 
 const scrolls = new Map<string, number>();
 
@@ -447,6 +448,7 @@ const settings: OsApp = {
     const Q = ['auto', 'low', 'medium', 'high', 'ultra'] as const;
     const qi = Math.max(0, Q.indexOf(st.quality));
     row('Graphics quality', st.quality[0]!.toUpperCase() + st.quality.slice(1), () => (st.quality = Q[(qi + 4) % 5]!), () => (st.quality = Q[(qi + 1) % 5]!));
+    row('FPS counter (F3)', perfOverlayEnabled() ? 'On' : 'Off', () => setPerfOverlay(false), () => setPerfOverlay(true));
     ui.text(`OS: ${ui.theme.name} · ${os.maxWindows()} window${os.maxWindows() > 1 ? 's' : ''} per screen`, r.x, y + 12, { size: 13, color: ui.theme.muted, maxWidth: r.w });
     y += 30;
     const [a, b] = splitH({ x: r.x, y, w: r.w, h: 40 }, r.w / 2 - 5, 10);
