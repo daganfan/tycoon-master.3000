@@ -177,7 +177,7 @@ export class Game {
       this.cashoutAcc += dt;
       if (this.cashoutAcc >= AUTO_CASHOUT_INTERVAL / this.stat('os.speed')) {
         this.cashoutAcc = 0;
-        for (const rt of this.running()) if (rt.money > 0) this.cashOut(rt.id);
+        for (const rt of this.running()) if (rt.money > 0 && this.autoCashoutOn(rt.id)) this.cashOut(rt.id);
       }
     }
     this.garage.tick(dt);
@@ -185,6 +185,16 @@ export class Game {
     this.checkLevels();
     this.checkQuests();
     s.rngState = this.rng.state;
+  }
+
+  /** Auto Cash-Out is owned and not switched off for this game. */
+  autoCashoutOn(tycoonId: string): boolean {
+    return this.flag('autoCashout') && !this.state.tycoons[tycoonId]?.autoCashoutOff;
+  }
+
+  toggleAutoCashout(tycoonId: string): void {
+    const rt = this.state.tycoons[tycoonId];
+    if (rt) rt.autoCashoutOff = !rt.autoCashoutOff;
   }
 
   running(): TycoonRuntime[] {
@@ -771,7 +781,7 @@ export class Game {
       for (const rt of this.running()) tycoonById(rt.id).tick(rt.state, rt, Math.min(step, simulated - t), this.ctx(rt));
     }
     let cash = this.garage.offline(simulated);
-    if (this.flag('autoCashout')) for (const rt of this.running()) cash = cash.add(this.cashOut(rt.id));
+    for (const rt of this.running()) if (this.autoCashoutOn(rt.id)) cash = cash.add(this.cashOut(rt.id));
     this.checkLevels();
     return { seconds: capped, cash };
   }

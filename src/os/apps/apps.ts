@@ -127,19 +127,30 @@ export function tycoonApp(id: string): OsApp {
         ui.text(`Level ${rt.level}`, p.x, p.y + 46, { size: 13, bold: true });
         ui.bar({ x: p.x + 70, y: p.y + 40, w: p.w - 70, h: 12 }, (rt.lifetime - prev) / (need - prev), def.color);
         if (ui.button({ x: p.x, y: p.y + 62, w: p.w, h: 48 }, cashLabel, { primary: true, size: 17, disabled: value.lte(0) })) game.cashOut(id);
-        ui.text(game.flag('autoCashout') ? `Auto cash-out ON · ${rateHint}` : `Coins drop out of the PC · ${rateHint}`, p.x + p.w / 2, p.y + 124, {
-          size: 12, color: ui.theme.muted, align: 'center', maxWidth: p.w,
-        });
-        upgradesList(ui, { x: p.x, y: p.y + 140, w: p.w, h: p.h - 140 }, id, game);
+        let top = 140;
+        if (game.flag('autoCashout')) {
+          // Switchable, so the player can save up for this game's upgrades.
+          const on = game.autoCashoutOn(id);
+          if (ui.button({ x: p.x, y: p.y + 116, w: p.w, h: 32 }, on ? '🔁 Auto cash-out: ON (click to save up)' : '⏸ Auto cash-out: OFF', { size: 13, primary: on }))
+            game.toggleAutoCashout(id);
+          ui.text(rateHint, p.x + p.w / 2, p.y + 162, { size: 12, color: ui.theme.muted, align: 'center', maxWidth: p.w });
+          top = 178;
+        } else {
+          ui.text(`Coins drop out of the PC · ${rateHint}`, p.x + p.w / 2, p.y + 124, { size: 12, color: ui.theme.muted, align: 'center', maxWidth: p.w });
+        }
+        upgradesList(ui, { x: p.x, y: p.y + top, w: p.w, h: p.h - top }, id, game);
         return;
       }
       // Narrow: money strip, Play / Upgrades tabs.
       const head = { x: r.x, y: r.y, w: r.w, h: 46 };
       ui.panel(head);
       const bw = Math.min(220, Math.max(150, r.w * 0.48));
-      ui.text(`${def.currency} ${formatNum(rt.money)}`, head.x + 10, head.y + 15, { size: 18, bold: true, maxWidth: r.w - bw - 26 });
-      ui.text(`L${rt.level} · ${formatNum(os.rate(id))}/s · ${rateHint}`, head.x + 10, head.y + 34, { size: 11, color: ui.theme.muted, maxWidth: r.w - bw - 26 });
+      const aw = game.flag('autoCashout') ? 76 : 0;
+      ui.text(`${def.currency} ${formatNum(rt.money)}`, head.x + 10, head.y + 15, { size: 18, bold: true, maxWidth: r.w - bw - aw - 26 });
+      ui.text(`L${rt.level} · ${formatNum(os.rate(id))}/s · ${rateHint}`, head.x + 10, head.y + 34, { size: 11, color: ui.theme.muted, maxWidth: r.w - bw - aw - 26 });
       if (ui.button({ x: head.x + head.w - bw - 6, y: head.y + 5, w: bw, h: 36 }, cashLabel, { primary: true, size: 14, disabled: value.lte(0) })) game.cashOut(id);
+      if (aw && ui.button({ x: head.x + head.w - bw - aw - 10, y: head.y + 5, w: aw, h: 36 }, game.autoCashoutOn(id) ? '🔁 Auto' : '⏸ Auto', { size: 13, primary: game.autoCashoutOn(id) }))
+        game.toggleAutoCashout(id);
       const affordable = def.upgrades.filter((u) => {
         const l = rt.upgrades[u.id] ?? 0;
         return (u.max === undefined || l < u.max) && rt.money >= upgradeCost(u, l);

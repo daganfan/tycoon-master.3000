@@ -76,6 +76,8 @@ export interface TycoonRuntime<S = unknown> {
   lifetime: number;
   level: number;
   upgrades: Record<string, number>;
+  /** Player switched Auto Cash-Out off for this game, so money can be saved up for upgrades. */
+  autoCashoutOff?: boolean;
   state: S;
 }
 
