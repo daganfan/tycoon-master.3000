@@ -17,7 +17,10 @@ import { ChaosDetector } from './chaos';
 import { CosmeticFx } from './cosmeticFx';
 import type { NetHooks } from './remote';
 import { Garage } from './garage/garage';
-import { clampCamera } from './garage/areas';
+import { areaAt, clampCamera } from './garage/areas';
+import { MotionProbe } from './perf';
+import { ScreenScheduler } from './screens';
+import { setPerfProvider } from './perfOverlay';
 
 interface ScreenEntry {
   os: TycoonOS;
@@ -62,6 +65,11 @@ export class World {
   private fx?: CosmeticFx;
   /** Phase 2: the garage behind the bedroom door. */
   garage?: Garage;
+  /** Perf: screen redraw/upload scheduling + shadow motion probe. */
+  private screenSched!: ScreenScheduler;
+  private motionProbe = new MotionProbe();
+  private motionObjs: THREE.Object3D[] = [];
+  private cosmeticsQueued = false;
 
   private constructor(
     readonly canvas: HTMLCanvasElement,
@@ -95,7 +103,7 @@ export class World {
 
   static async create(canvas: HTMLCanvasElement, game: Game, host: OsHost): Promise<World> {
     const R = await initRapier();
-    const gfx = new Graphics(canvas);
+    const gfx = new Graphics(canvas, game.state.settings.quality ?? 'auto');
     const renderer = gfx.renderer;
     const phys = new Physics(R);
     const scene = new THREE.Scene();
@@ -105,6 +113,7 @@ export class World {
     const w = new World(canvas, game, host, phys, room, cash, avatar, renderer);
     w.fx = new CosmeticFx({ game, phys, cash, roots: (t) => w.targetObjects(t), bodies: (t) => w.targetBodies(t) });
     w.gfx = gfx;
+    w.screenSched = new ScreenScheduler(renderer);
     // move built content into the world's scene
     while (scene.children.length) w.scene.add(scene.children[0]!);
     w.setupLights();
@@ -116,16 +125,32 @@ export class World {
     w.bindInput();
     w.resize();
     cash.restorePile(game.state.floorCash, new THREE.Vector3(0.9, 0, -1.4));
+    w.setupPerf();
+    // Compile every shader behind the loading screen instead of hitching in play.
+    await gfx.precompile();
     return w;
   }
 
   /* ------------------------------------------------------------ setup */
 
   private setupLights(): void {
-    this.lighting = new Lighting(this.scene, this.gfx, this.room, () => this.screens[0]?.os.canvas);
+    this.lighting = new Lighting(this.scene, this.gfx, this.room, () => (this.screenSched.glowKnown ? this.screenSched.glow : null));
     this.gfx.setQuality(this.game.state.settings.quality ?? 'auto');
     this.gfx.attach(this.scene, this.camera);
     this.avatar.lookTarget = this.camera.position;
+  }
+
+  /** Perf hooks: shadow-update motion probe and the F3 overlay. */
+  private setupPerf(): void {
+    this.gfx.motion = () => {
+      const objs = this.motionObjs;
+      objs.length = 0;
+      for (const o of this.phys.objs) objs.push(o.mesh);
+      objs.push(this.room.door);
+      return this.motionProbe.moving(objs, this.cash.awake > 0 || areaAt(this.avatar.obj.mesh.position).id === 'garage');
+    };
+    this.gfx.extraStats = () => `\nscreens ${this.screenSched.redrawsPerSec.toFixed(1)} redraws/s (${this.screens.length})`;
+    setPerfProvider(() => this.gfx.stats());
   }
 
   private addScreen(mesh: THREE.Mesh, obj: PhysObj, w: number, h: number, label: string): ScreenEntry {
@@ -167,6 +192,7 @@ export class World {
     const main = res.obj ?? created[0];
     let extra = 0;
     for (const o of created) this.interact.register(o, o === main ? `${id}#${index}` : `${id}#${index}/${++extra}`);
+    for (const o of created) this.gfx.adopt(o.mesh);
     if (res.obj) {
       this.props.push(res.obj);
       res.obj.mesh.traverse((o) => o.name === 'spin' && this.spinners.push(o));
@@ -198,12 +224,14 @@ export class World {
       const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(scr.mesh.getWorldQuaternion(new THREE.Quaternion()));
       const toy = spawnToy(e.kind, center.add(normal.clone().multiplyScalar(0.12)), normal, this.scene, this.phys);
       this.props.push(toy);
+      this.gfx.adopt(toy.mesh);
       if (this.props.filter((p) => p.kind === e.kind).length > 25) {
         const old = this.props.find((p) => p.kind === e.kind)!;
         this.props.splice(this.props.indexOf(old), 1);
         this.phys.remove(old);
       }
-      this.applyCosmetics();
+      // Toys can spawn in bursts: re-apply cosmetics once per frame, not per toy.
+      this.cosmeticsQueued = true;
       if (e.kind === 'duck') this.sfx.quack();
     });
     this.cash.bounce = g.stat('coin.bounce');
@@ -425,7 +453,12 @@ export class World {
   /* ------------------------------------------------------------ frame */
 
   update(dt: number): void {
+    const cpu0 = performance.now();
     this.time += dt;
+    if (this.cosmeticsQueued) {
+      this.cosmeticsQueued = false;
+      this.applyCosmetics();
+    }
     this.sfx.volume = this.game.state.settings.volume;
     const comfort = this.game.state.settings.comfort;
 
@@ -458,17 +491,7 @@ export class World {
     // Screens
     const focusedTycoon = this.focus?.os.focusedTycoon() ?? null;
     this.game.focused = focusedTycoon;
-    for (const s of this.screens) {
-      s.redraw -= dt;
-      s.acc += dt;
-      const fps = s === this.focus ? 30 : 6;
-      if (s.redraw <= 0) {
-        s.redraw = 1 / fps;
-        s.os.update(s.acc);
-        s.acc = 0;
-        s.tex.needsUpdate = true;
-      }
-    }
+    this.screenSched.update(dt, this.screens, this.focus, this.camera, this.gfx.frames.avg(1));
 
     // Hint text
     const near = this.nearestScreen();
@@ -486,7 +509,10 @@ export class World {
     this.updateCamera(dt);
     this.gfx.setQuality((this.game.state.settings.quality ?? 'auto') as Quality);
     this.gfx.setFocus(this.focusBlend);
+    this.gfx.focusPoint.copy(this.avatar.obj.mesh.position);
+    this.gfx.cpuMs = this.gfx.cpuMs * 0.9 + (performance.now() - cpu0) * 0.1;
     this.gfx.render(dt);
+    this.screenSched.afterRender(this.screens[0]);
   }
 
   private jelly(dt: number, comfort: number): void {

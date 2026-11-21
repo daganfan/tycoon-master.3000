@@ -5,6 +5,7 @@ import { GARAGE } from '@/content/garage';
 import { itemById } from '@/content/items';
 import type { Game } from '@/sim/game';
 import type { Physics, PhysObj } from '../physics';
+import { scaleLightIntensity, setLightEnabled, virtualizeLight } from '../perf';
 import type { Cash } from '../cash';
 import type { Avatar } from '../avatar';
 import type { Interact } from '../interact';
@@ -82,6 +83,12 @@ export class Garage {
       if (e.id === 'garage_key') this.openDoor();
     });
     this.findSun();
+    // Perf: point lights join the light pool; real lights (the shadowed spot) must stay
+    // counted when the garage root is hidden, so they move to the scene root.
+    for (const l of this.shell.lights) {
+      if ((l as THREE.PointLight).isPointLight) virtualizeLight(l as THREE.PointLight);
+      else w.scene.attach(l);
+    }
     // Garage content renders on its own layer: the main camera sees it, the bedroom's shadow passes don't.
     w.camera.layers.enable(GARAGE_LAYER);
     w.scene.traverse((o) => {
@@ -103,7 +110,9 @@ export class Garage {
     this.shell.root.visible = show;
     this.factory.root.visible = show;
     this.particles.points.visible = show;
-    for (const l of this.shell.lights) l.visible = show;
+    // Never hide/show real lights (the light count is baked into every shader):
+    // pooled point lights follow root visibility, the spot just dims and stops its shadow pass.
+    for (const l of this.shell.lights) setLightEnabled(l, show);
   }
 
   private unlocked(): boolean {
@@ -170,7 +179,7 @@ export class Garage {
     const mesh = buildGarageProp(id);
     if (!mesh) return;
     if (id === 'g_disco_lamp') {
-      for (const l of this.shell.lights) l.intensity *= 1.3;
+      for (const l of this.shell.lights) scaleLightIntensity(l, 1.3);
       for (const t of this.shell.tubes) t.emissiveIntensity *= 1.3;
     }
     if (!spec.half) {

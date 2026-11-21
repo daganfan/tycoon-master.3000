@@ -91,6 +91,10 @@ interface Bit {
   kind: Kind;
   value: Num;
   age: number;
+  /** Cached pose (x,y,z, qx,qy,qz,qw): sleeping bits are not queried from the physics engine. */
+  pose: Float32Array;
+  /** Pose must be refreshed from the body (new, awake or just woken). */
+  live: boolean;
 }
 
 const tmpM = new THREE.Matrix4();
@@ -110,6 +114,9 @@ export class Cash {
   private mergeT = 0;
   private patches: PhysicsPatch[] = [];
   bounce = 0.3;
+  /** Bits that moved this frame (0 = the pile is at rest; shadows can stay cached). */
+  awake = 0;
+  private lastCounts = [-1, -1, -1];
 
   constructor(
     private readonly phys: Physics,
@@ -176,7 +183,7 @@ export class Cash {
     this.phys.world.createCollider(desc, body);
     body.setLinvel(vel, true);
     body.setAngvel({ x: (Math.random() - 0.5) * 20, y: (Math.random() - 0.5) * 20, z: (Math.random() - 0.5) * 20 }, true);
-    const b: Bit = { body, kind, value, age: 0 };
+    const b: Bit = { body, kind, value, age: 0, pose: new Float32Array(7), live: true };
     this.patchBody(b);
     this.bits.push(b);
   }
@@ -223,16 +230,35 @@ export class Cash {
     onCollect: (v: Num, coins: number) => void,
   ): number {
     let fast = 0;
+    let awake = 0;
     for (let i = this.bits.length - 1; i >= 0; i--) {
       const b = this.bits[i]!;
       b.age += dt;
-      const t = b.body.translation();
-      const dx = player.x - t.x;
-      const dz = player.z - t.z;
-      const dy = player.y - 0.4 - t.y;
+      // Sleeping bits use their cached pose: no per-frame allocations from the physics bindings.
+      const sleeping = !b.live && b.body.isSleeping();
+      if (!sleeping) {
+        awake++;
+        const t = b.body.translation();
+        const r = b.body.rotation();
+        const P = b.pose;
+        P[0] = t.x;
+        P[1] = t.y;
+        P[2] = t.z;
+        P[3] = r.x;
+        P[4] = r.y;
+        P[5] = r.z;
+        P[6] = r.w;
+        b.live = !b.body.isSleeping();
+        const v = b.body.linvel();
+        if (v.x * v.x + v.y * v.y + v.z * v.z > 6.25) fast++;
+      }
+      const tx = b.pose[0]!;
+      const ty = b.pose[1]!;
+      const tz = b.pose[2]!;
+      const dx = player.x - tx;
+      const dz = player.z - tz;
+      const dy = player.y - 0.4 - ty;
       const d = Math.hypot(dx, dz);
-      const v = b.body.linvel();
-      if (v.x * v.x + v.y * v.y + v.z * v.z > 6.25) fast++;
       if (b.age > 0.6 && d < 0.5 && Math.abs(dy) < 1.1) {
         onCollect(b.value, b.kind === 0 ? 1 : b.kind === 1 ? 10 : 50);
         this.phys.world.removeRigidBody(b.body);
@@ -243,9 +269,11 @@ export class Cash {
         const m = b.body.mass();
         const pull = d < magnet ? 6 : 1.5;
         b.body.applyImpulse({ x: (dx / d) * pull * m * dt, y: 0.5 * m * dt, z: (dz / d) * pull * m * dt }, true);
+        b.live = true;
       }
-      if (t.y < -2) {
+      if (ty < -2) {
         b.body.setTranslation({ x: 0, y: 1, z: 0 }, true);
+        b.live = true;
       }
     }
     this.mergeT += dt;
@@ -254,7 +282,8 @@ export class Cash {
       this.merge(0);
       this.merge(1);
     }
-    this.render();
+    this.awake = awake;
+    this.render(awake > 0);
     return fast;
   }
 
@@ -281,18 +310,25 @@ export class Cash {
     this.spawn((kind + 1) as Kind, value, { x: c.x, y: c.y + 0.15, z: c.z }, { x: 0, y: 1, z: 0 });
   }
 
-  private render(): void {
+  /** Upload instance matrices only when something moved, and only the used range. */
+  private render(moved: boolean): void {
     const counts = [0, 0, 0];
+    for (const b of this.bits) counts[b.kind]!++;
+    const changed = moved || counts.some((c, i) => c !== this.lastCounts[i]);
+    if (!changed) return;
+    this.lastCounts = counts;
+    counts.fill(0);
     for (const b of this.bits) {
-      const t = b.body.translation();
-      const r = b.body.rotation();
-      tmpP.set(t.x, t.y, t.z);
-      tmpQ.set(r.x, r.y, r.z, r.w);
+      const P = b.pose;
+      tmpP.set(P[0]!, P[1]!, P[2]!);
+      tmpQ.set(P[3]!, P[4]!, P[5]!, P[6]!);
       tmpM.compose(tmpP, tmpQ, ONE);
       this.meshes[b.kind]!.setMatrixAt(counts[b.kind]!++, tmpM);
     }
     this.meshes.forEach((m, i) => {
       m.count = counts[i]!;
+      m.instanceMatrix.clearUpdateRanges();
+      m.instanceMatrix.addUpdateRange(0, Math.max(1, m.count) * 16);
       m.instanceMatrix.needsUpdate = true;
     });
   }
