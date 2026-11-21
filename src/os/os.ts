@@ -172,10 +172,7 @@ export class TycoonOS {
       return;
     }
     this.open(id);
-    if (plan.pauses.length) {
-      const names = plan.pauses.map((p) => this.appTitle(p)).join(', ');
-      this.toast(`${names}: paused while ${this.appTitle(id)} is open. Close it to resume.`, 'warn');
-    }
+    if (plan.pauses.length) this.toast(`Close ${this.appTitle(id)} to bring the game back.`, 'info');
   }
 
   close(id: string): void {
@@ -363,14 +360,21 @@ export class TycoonOS {
     ui.rect(tb, ui.theme.taskbar, 0);
     ui.bevel(tb);
     if (ui.button({ x: 6, y: tb.y + 6, w: 96, h: TASKBAR_H - 12 }, '🪙 Start', { primary: dark, size: 16 })) this.startOpen = !this.startOpen;
-    // Tray: running count, cash, clock.
+    // Tray: running count, cash, clock (right to left).
     const g = this.game;
-    const runningN = g.running().length;
-    const trayW = 260;
-    const tray = tb.x + tb.w - trayW;
-    ui.text(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), tb.w - 12, tb.y + TASKBAR_H / 2, { size: 15, color: fg, align: 'right' });
-    ui.text(formatCash(g.state.cash), tb.w - 70, tb.y + TASKBAR_H / 2, { size: 17, bold: true, color: fg, align: 'right', maxWidth: 110 });
-    ui.text(`▶ ${runningN}/${g.capacity()}`, tray + 8, tb.y + TASKBAR_H / 2, { size: 14, bold: true, color: fg, maxWidth: 66 });
+    const mid = tb.y + TASKBAR_H / 2;
+    const clock = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    let right = tb.w - 10;
+    ui.text(clock, right, mid, { size: 14, color: fg, align: 'right' });
+    right -= ui.measure(clock, 14) + 14;
+    const cash = formatCash(g.state.cash);
+    const cashW = Math.min(110, ui.measure(cash, 16, true));
+    ui.text(cash, right, mid, { size: 16, bold: true, color: fg, align: 'right', maxWidth: cashW });
+    right -= cashW + 14;
+    const run = `▶ ${g.running().length}/${g.capacity()}`;
+    const runW = ui.measure(run, 13, true);
+    ui.text(run, right, mid, { size: 13, bold: true, color: fg, align: 'right' });
+    const tray = right - runW - 8;
     // Window + minimized-game buttons.
     const entries: { id: string; state: 'front' | 'open' | 'bg' | 'paused' }[] = [];
     const wins = this.windows;
@@ -382,7 +386,7 @@ export class TycoonOS {
     entries.forEach((e, i) => {
       const app = apps.find((a) => a.id === e.id);
       if (!app) return;
-      const mark = e.state === 'bg' ? '▶ ' : e.state === 'paused' ? '⏸ ' : '';
+      const mark = e.state === 'bg' ? '▶ ' : e.state === 'paused' ? '⏸️ ' : '';
       const r = { x: x0 + i * (bw + 6), y: tb.y + 6, w: bw, h: TASKBAR_H - 12 };
       const label = bw < 70 ? `${mark}${app.icon}` : `${mark}${app.icon} ${app.title}`;
       if (ui.button(r, label, { size: 13, primary: e.state === 'front' && dark, textColor: e.state === 'paused' ? '#999' : undefined })) this.launch(e.id);
@@ -423,7 +427,7 @@ export class TycoonOS {
     const g = this.game;
     ui.rect(full, 'rgba(0,0,0,0.45)', 0);
     const w = Math.min(600, this.vw - 40);
-    const h = 300;
+    const h = 270;
     const p = { x: (this.vw - w) / 2, y: Math.max(10, (this.vh - TASKBAR_H - h) / 2), w, h };
     ui.pushBounds(p, 'dialog');
     ui.panel(p, ui.theme.window, false);
@@ -504,12 +508,13 @@ export class TycoonOS {
   private drawToasts(): void {
     const ui = this.ui;
     this.toasts.forEach((t, i) => {
-      const w = Math.min(440, this.vw - 32);
-      const r = { x: this.vw - w - 16, y: 12 + i * 58, w, h: 50 };
+      // Below the window title bars, so close/minimize stay visible.
+      const w = Math.min(400, this.vw - 32);
+      const r = { x: this.vw - w - 16, y: 50 + i * 48, w, h: 42 };
       ui.g.globalAlpha = Math.min(1, t.t * 2);
       const col = t.tone === 'good' ? '#1f7a35' : t.tone === 'warn' ? '#a3561a' : t.tone === 'token' ? '#5b2a99' : '#1c2a44';
       ui.rect(r, col, 8);
-      ui.text(t.text, r.x + 14, r.y + r.h / 2, { size: 15, bold: true, color: '#fff', maxWidth: w - 28 });
+      ui.text(t.text, r.x + 12, r.y + r.h / 2, { size: 14, bold: true, color: '#fff', maxWidth: w - 24 });
       ui.g.globalAlpha = 1;
     });
     if (this.toasts.length) this.dirty = true;

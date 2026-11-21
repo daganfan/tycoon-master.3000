@@ -91,7 +91,7 @@ function upgradesList(ui: Ui, r: Rect, id: string, game: Game): void {
 function pausedView(ui: Ui, view: Rect, id: string, os: TycoonOS): void {
   ui.panel(view, '#222');
   const where = whereLabel(os.game, id);
-  ui.text('⏸ Paused', view.x + view.w / 2, view.y + view.h / 2 - 40, { size: 24, color: '#fff', bold: true, align: 'center' });
+  ui.text('⏸️ Paused', view.x + view.w / 2, view.y + view.h / 2 - 40, { size: 24, color: '#fff', bold: true, align: 'center' });
   ui.text(where.text, view.x + view.w / 2, view.y + view.h / 2 - 8, { size: 14, color: '#ccc', align: 'center', maxWidth: view.w - 20 });
   if (ui.button({ x: view.x + view.w / 2 - 100, y: view.y + view.h / 2 + 16, w: 200, h: 44 }, '▶ Run here', { primary: true }))
     os.launch(id);
@@ -230,7 +230,7 @@ const appStore: OsApp = {
       const where = whereLabel(game, row.id);
       ui.text(where.text, rr.x + 58, rr.y + 56, { size: 12, bold: true, color: where.running ? ui.theme.good : ui.theme.bad, maxWidth: tw });
       if (where.running) {
-        if (ui.button(b, '⏹ Stop', { size: 14 })) game.stopGame(row.id);
+        if (ui.button(b, '⏹️ Stop', { size: 14 })) game.stopGame(row.id);
       } else if (ui.button(b, '▶ Open here', { size: 14, primary: true })) os.launch(row.id);
     });
   },
@@ -324,7 +324,7 @@ const taskmgr: OsApp = {
       ui.text(usdText, rr.x + rr.w - bw - 14, rr.y + rr.h / 2, { size: 14, bold: true, align: 'right', maxWidth: uw });
       const b = { x: rr.x + rr.w - bw - 6, y: rr.y + 12, w: bw, h: rr.h - 24 };
       if (where.running) {
-        if (ui.button(b, '⏹ Stop', { size: 13 })) g.stopGame(rt.id);
+        if (ui.button(b, '⏹️ Stop', { size: 13 })) g.stopGame(rt.id);
       } else if (ui.button(b, '▶ Open', { size: 13, primary: true })) os.launch(rt.id);
     });
   },

@@ -562,7 +562,7 @@ export class Game {
     return out;
   }
 
-  /** Recompute which games run; announces games that start or pause. */
+  /** Recompute which games run; announces games that pause. */
   syncDesk(announce = true): void {
     const desk = this.state.desk;
     const cap = this.windowsPerScreen();
@@ -579,9 +579,8 @@ export class Game {
       const now = on.has(rt.id);
       if (now === rt.installed) continue;
       rt.installed = now;
-      if (!announce) continue;
-      const def = tycoonById(rt.id);
-      this.bus.emit('notify', { text: now ? `▶ ${def.name} running` : `⏸ ${def.name} paused`, tone: now ? 'good' : 'warn' });
+      // Only pauses are announced (starting a game is something you just did yourself).
+      if (announce && !now) this.bus.emit('notify', { text: `⏸️ ${tycoonById(rt.id).name} paused: not open on any screen`, tone: 'warn' });
     }
   }
 
