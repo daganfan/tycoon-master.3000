@@ -6,6 +6,28 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Camera and controls:** pointer-lock mouse look, first-person mode (V), over-the-shoulder third person with wall collision, crosshair interaction and context hints, and a Controls tab in Settings (sensitivity, invert Y, FOV, head bob).
+- **Bigger bedroom:**
+  - 8 m × 6.5 m, with a 2 m desk and monitor risers, a second table, bookcase, dresser, nightstand and 4 wall shelves.
+  - Purchases land on free spots.
+  - Working fixtures: light switch, door, drawers, curtains and PC power.
+  - The bed can be shoved.
+- **Breakable window**, repaired by the Window Guy or by Mom.
+- **Achievements:** 24 trophies, 8 of them secret, shown in a Trophies app.
+- **Performance:**
+  - Cached shadows, reduced-resolution AO and bloom, and a fixed light pool so shaders don't recompile.
+  - Shaders precompiled behind the loading screen.
+  - Dynamic resolution, an adaptive Auto preset and a screen-redraw scheduler.
+  - FPS overlay on F3. Draw calls are 60–75% lower.
+
+### Changed
+- Mini-games earn only while their window is open on a screen. Monitors and PCs are screens (+1 game each), TycoonOS XP shows 2 windows per screen, and background slots come from skills/items.
+- The exchange rate starts at x0.30 and rises with upgrades. Prices were rebalanced: the Garage Key costs $650k and also gives x2.2.
+- TycoonOS lays out at a fixed logical resolution, so every app fits small monitors.
+- Tidy Up only moves an object's home when you deliberately place it (or press H). Tidy is smooth, ordered and idempotent.
+- The calm physics setting (0%) is much more stable.
+- Save version 5, with migrations for the screen model and the bigger room.
+
 - **The Garage (Phase 2):**
   - A walk-in physical factory tycoon: Scrap-o-Matic Works, with 18 buy pads, droppers of real physics scrap, conveyors, upgrader gates, a furnace, a tank, a collect pad, a Robo-Helper and rebirths that give Factory Stars.
   - Two new PC games: Hot Dog Highway and Robo Car Wash.

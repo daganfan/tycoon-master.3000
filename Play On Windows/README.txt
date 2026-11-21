@@ -22,5 +22,8 @@ SAVES
 Your progress is saved automatically on this computer.
 
 CONTROLS
-WASD move · Shift sprint · Space jump · E use a screen · Esc step back
-G / hold mouse: grab things · R stand things up · F flop · T skill tree
+Click the game to capture the mouse (Esc frees it)
+Mouse look · WASD move · Shift sprint · Space jump · V 1st/3rd person
+E use a screen / light switch / door / drawer · Esc step back from a screen
+G or hold left mouse: grab and carry · scroll: push/pull · right click: drop
+R stand things up · H set this spot as home · F flop · T skill tree · F3 FPS
