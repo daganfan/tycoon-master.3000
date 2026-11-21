@@ -107,7 +107,7 @@ const ebuy: OsApp = {
     CATS.forEach((c, i) => {
       if (ui.button({ x: r.x + i * (tw + 6), y: r.y, w: tw, h: 34 }, c.label, { primary: shopCat === c.id, size: tw < 80 ? 11 : 14 })) shopCat = c.id;
     });
-    const items = ITEMS.filter((i) => shopCat === 'all' || i.category === shopCat);
+    const items = ITEMS.filter((i) => (shopCat === 'all' || i.category === shopCat) && game.phaseOpen(i.phase));
     list(ui, 'ebuy', { x: r.x, y: r.y + 44, w: r.w, h: r.h - 44 }, items, 78, (it, rr) => {
       const owned = game.state.items[it.id] ?? 0;
       const maxed = owned >= it.max;
@@ -131,7 +131,8 @@ const appStore: OsApp = {
     ui.text(`Game slots: ${game.slotsUsed()}/${game.slots()} running`, r.x, r.y + 14, { size: 16, bold: true });
     type Row = { kind: 'game'; id: string } | { kind: 'soon'; name: string; icon: string; phase: string };
     const rows: Row[] = [
-      ...TYCOONS.map((t) => ({ kind: 'game' as const, id: t.id })),
+      ...TYCOONS.filter((t) => game.phaseOpen(t.phase)).map((t) => ({ kind: 'game' as const, id: t.id })),
+      ...TYCOONS.filter((t) => !game.phaseOpen(t.phase)).map((t) => ({ kind: 'soon' as const, name: t.name, icon: t.icon, phase: `${PHASE_NAMES[t.phase]} (needs the key)` })),
       ...UPCOMING.map((u) => ({ kind: 'soon' as const, name: u.name, icon: u.icon, phase: PHASE_NAMES[u.phase] })),
     ];
     list(ui, 'store', { x: r.x, y: r.y + 34, w: r.w, h: r.h - 34 }, rows, 76, (row, rr) => {

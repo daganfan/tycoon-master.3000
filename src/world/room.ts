@@ -6,6 +6,8 @@ import { markScreenMaterial } from './render';
 import { ceilingTex, clockFace, crustyPlastic, fabricSet, fringeTex, labelTex, plaster, posterTex, rand, rug, skyTex, woodFloor, woodGrain } from './textures';
 
 export const ROOM = { hx: 3, hz: 2.5, h: 2.7 };
+/** The door in the front wall (leads to the garage). */
+export const DOOR = { x: 1.6, w: 0.9, h: 2.05 };
 
 /** Window opening in the right wall (x = +hx). Centre z/y, width along z, height. */
 export const WINDOW = { z: 0.6, y: 1.55, w: 1.4, h: 1.1, depth: 0.16 };
@@ -117,6 +119,8 @@ export interface RoomRefs {
   screen: Screen;
   chair: PhysObj;
   garageSign: THREE.Mesh;
+  /** Door pivot (hinge on the -x edge); the garage module swings it open. */
+  door: THREE.Group;
   deskTopY: number;
   /** Sky seen through the window (uniforms: day, dusk, intensity). */
   sky: THREE.ShaderMaterial;
@@ -399,8 +403,8 @@ export function buildRoom(scene: THREE.Scene, phys: Physics): RoomRefs {
   // ------------------------------------------------------------ walls + ceiling
   const pl = plaster(36, 20, 80);
   const wallMat = mat('#ffffff', 0.9, 0, { map: pl.map, normalMap: pl.normal, normalScale: new THREE.Vector2(0.35, 0.35) });
-  const wall = (w: number, pos: THREE.Vector3, ry: number, holes: { x: number; y: number; w: number; h: number }[] = []) => {
-    const m = new THREE.Mesh(wallGeo(w, h, holes), wallMat);
+  const wall = (w: number, pos: THREE.Vector3, ry: number, holes: { x: number; y: number; w: number; h: number }[] = [], wh = h) => {
+    const m = new THREE.Mesh(wallGeo(w, wh, holes), wallMat);
     m.position.copy(pos);
     m.rotation.y = ry;
     m.receiveShadow = true;
@@ -409,11 +413,18 @@ export function buildRoom(scene: THREE.Scene, phys: Physics): RoomRefs {
     scene.add(m);
   };
   wall(hx * 2, new THREE.Vector3(0, h / 2, -hz), 0);
-  wall(hx * 2, new THREE.Vector3(0, h / 2, hz), Math.PI);
+  // Front wall with a doorway (to the garage).
+  const dl = DOOR.x - DOOR.w / 2;
+  const dr = DOOR.x + DOOR.w / 2;
+  wall(dl + hx, new THREE.Vector3((dl - hx) / 2, h / 2, hz), Math.PI);
+  wall(hx - dr, new THREE.Vector3((dr + hx) / 2, h / 2, hz), Math.PI);
+  wall(DOOR.w, new THREE.Vector3(DOOR.x, (DOOR.h + h) / 2, hz), Math.PI, [], h - DOOR.h);
   wall(hz * 2, new THREE.Vector3(-hx, h / 2, 0), Math.PI / 2);
   wall(hz * 2, new THREE.Vector3(hx, h / 2, 0), -Math.PI / 2, [{ x: WINDOW.z, y: WINDOW.y - h / 2, w: WINDOW.w, h: WINDOW.h }]);
   phys.staticBox({ x: hx, y: h, z: 0.1 }, { x: 0, y: h / 2, z: -hz - 0.1 });
-  phys.staticBox({ x: hx, y: h, z: 0.1 }, { x: 0, y: h / 2, z: hz + 0.1 });
+  phys.staticBox({ x: (dl + hx) / 2, y: h / 2, z: 0.1 }, { x: (dl - hx) / 2, y: h / 2, z: hz + 0.1 });
+  phys.staticBox({ x: (hx - dr) / 2, y: h / 2, z: 0.1 }, { x: (dr + hx) / 2, y: h / 2, z: hz + 0.1 });
+  phys.staticBox({ x: DOOR.w / 2, y: (h - DOOR.h) / 2, z: 0.1 }, { x: DOOR.x, y: (h + DOOR.h) / 2, z: hz + 0.1 });
   phys.staticBox({ x: 0.1, y: h, z: hz }, { x: -hx - 0.1, y: h / 2, z: 0 });
   phys.staticBox({ x: 0.1, y: h, z: hz }, { x: hx + 0.1, y: h / 2, z: 0 });
   phys.staticBox({ x: hx, y: 0.1, z: hz }, { x: 0, y: h + 0.1, z: 0 });
@@ -427,17 +438,20 @@ export function buildRoom(scene: THREE.Scene, phys: Physics): RoomRefs {
 
   // Baseboards + crown molding
   const trimM = mat('#f4f0e6', 0.45);
-  const walls: { len: number; x: number; z: number; ry: number }[] = [
+  // base: false = crown only (front wall has the doorway, so its baseboard is split in two)
+  const walls: { len: number; x: number; z: number; ry: number; base?: boolean; crown?: boolean }[] = [
     { len: hx * 2, x: 0, z: -hz, ry: 0 },
-    { len: hx * 2, x: 0, z: hz, ry: Math.PI },
+    { len: hx * 2, x: 0, z: hz, ry: Math.PI, base: false },
+    { len: dl + hx, x: (dl - hx) / 2, z: hz, ry: Math.PI, crown: false },
+    { len: hx - dr, x: (dr + hx) / 2, z: hz, ry: Math.PI, crown: false },
     { len: hz * 2, x: -hx, z: 0, ry: Math.PI / 2 },
     { len: hz * 2, x: hx, z: 0, ry: -Math.PI / 2 },
   ];
   const trims: THREE.BufferGeometry[] = [];
   for (const wdef of walls) {
     const m = new THREE.Matrix4().compose(new THREE.Vector3(wdef.x, 0, wdef.z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), wdef.ry), new THREE.Vector3(1, 1, 1));
-    trims.push(profileGeo(BASEBOARD, wdef.len).applyMatrix4(m));
-    trims.push(profileGeo(CROWN, wdef.len).translate(0, h, 0).applyMatrix4(m));
+    if (wdef.base !== false) trims.push(profileGeo(BASEBOARD, wdef.len).applyMatrix4(m));
+    if (wdef.crown !== false) trims.push(profileGeo(CROWN, wdef.len).translate(0, h, 0).applyMatrix4(m));
   }
   const trim = new THREE.Mesh(merge(trims), trimM);
   trim.receiveShadow = true;
@@ -808,42 +822,32 @@ export function buildRoom(scene: THREE.Scene, phys: Physics): RoomRefs {
   phys.addCollider(chairBody, R.ColliderDesc.cylinder(0.2, 0.025).setTranslation(0, 0.24, 0), { density: 300 });
   const chairObj = phys.track(chair, chairBody, 'chair', 'props', { restitution: 0.1, friction: 0.5, density: 200 });
 
-  // ------------------------------------------------------------ door + frame + garage teaser sign (front wall)
+  // ------------------------------------------------------------ door (hinged, opens to the garage) + frame + teaser sign
   const doorM = mat('#ece6d8', 0.42);
+  const doorPivot = new THREE.Group();
+  doorPivot.name = 'bedroom-door';
+  doorPivot.position.set(dl, 0, hz - 0.03);
+  scene.add(doorPivot);
   const door = rbox(0.9, 2.05, 0.05, 0.01, doorM);
-  door.position.set(1.6, 1.025, hz - 0.03);
-  scene.add(shadowed(door));
+  door.position.set(DOOR.w / 2, 1.025, 0);
+  doorPivot.add(shadowed(door));
   const panels: THREE.BufferGeometry[] = [];
   for (const [py, ph] of [[1.55, 0.7], [0.55, 0.75]] as const)
-    for (const px of [-0.2, 0.2]) panels.push(placed(new RoundedBoxGeometry(0.3, ph, 0.012, 2, 0.005), 1.6 + px, py, hz - 0.058));
-  scene.add(shadowed(new THREE.Mesh(merge(panels), doorM)));
+    for (const px of [-0.2, 0.2]) panels.push(placed(new RoundedBoxGeometry(0.3, ph, 0.012, 2, 0.005), DOOR.w / 2 + px, py, -0.028));
+  doorPivot.add(shadowed(new THREE.Mesh(merge(panels), doorM)));
   const doorCasing = merge([
-    placed(new RoundedBoxGeometry(0.08, 2.12, 0.025, 2, 0.006), 1.6 - 0.49, 1.06, hz - 0.012),
-    placed(new RoundedBoxGeometry(0.08, 2.12, 0.025, 2, 0.006), 1.6 + 0.49, 1.06, hz - 0.012),
-    placed(new RoundedBoxGeometry(1.06, 0.09, 0.025, 2, 0.006), 1.6, 2.13, hz - 0.012),
+    placed(new RoundedBoxGeometry(0.08, 2.12, 0.025, 2, 0.006), DOOR.x - 0.49, 1.06, hz - 0.012),
+    placed(new RoundedBoxGeometry(0.08, 2.12, 0.025, 2, 0.006), DOOR.x + 0.49, 1.06, hz - 0.012),
+    placed(new RoundedBoxGeometry(1.06, 0.09, 0.025, 2, 0.006), DOOR.x, 2.13, hz - 0.012),
   ]);
   scene.add(shadowed(new THREE.Mesh(doorCasing, trimM)));
-  const brass = mat('#c9a24a', 0.25, 1);
-  const knob = new THREE.Mesh(new THREE.SphereGeometry(0.03, 20, 14), brass);
-  knob.position.set(1.95, 1.0, hz - 0.085);
-  scene.add(knob);
-  const rose = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.01, 20), brass);
-  rose.rotation.x = Math.PI / 2;
-  rose.position.set(1.95, 1.0, hz - 0.06);
-  scene.add(rose);
-  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.03, 10), brass);
-  shaft.rotation.x = Math.PI / 2;
-  shaft.position.set(1.95, 1.0, hz - 0.07);
-  scene.add(shaft);
-  for (const hy of [0.3, 1.75]) {
-    const hinge = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.09, 10), brass);
-    hinge.position.set(1.6 - 0.45, hy, hz - 0.06);
-    scene.add(hinge);
-  }
+  const knob = new THREE.Mesh(new THREE.SphereGeometry(0.03, 20, 14), mat('#c9a24a', 0.25, 1));
+  knob.position.set(0.8, 1.0, -0.055);
+  doorPivot.add(knob);
   const garageSign = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.32), mat('#ffffff', 0.8, 0, { map: labelTex('GARAGE →\n🔒 Key needed', '#ffeb3b', '#222', 512, 320, 54) }));
-  garageSign.position.set(1.6, 1.55, hz - 0.066);
+  garageSign.position.set(DOOR.w / 2, 1.55, -0.036);
   garageSign.rotation.y = Math.PI;
-  scene.add(garageSign);
+  doorPivot.add(garageSign);
 
   // Light switch + power outlet
   const plateM = mat('#f6f4ee', 0.35);
@@ -922,6 +926,7 @@ export function buildRoom(scene: THREE.Scene, phys: Physics): RoomRefs {
     chair: chairObj,
     screen: { mesh: mon.screen, obj: monitor, w: 0.52, h: 0.36 },
     garageSign,
+    door: doorPivot,
     deskTopY,
     sky: skyMat,
     glass,

@@ -1,6 +1,7 @@
 import type { Num } from '@/core/num';
 import type { Rng } from '@/core/rng';
 import type { StatModifier } from '@/core/stats';
+import type { GarageState } from './garage/factory';
 
 export const TOKENS = ['grind', 'mogul', 'chaos', 'pixel', 'golden'] as const;
 export type TokenId = (typeof TOKENS)[number];
@@ -194,4 +195,6 @@ export interface GameState {
   settings: Settings;
   /** Prop placements keyed by stable id (`desk`, `used_monitor#0`, ...). */
   layout: Record<string, PropPose>;
+  /** Phase 2 factory progress. */
+  garage: GarageState;
 }

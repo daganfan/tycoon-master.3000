@@ -23,13 +23,26 @@ export interface BotReport {
  * coins and causes occasional, realistic mayhem through the Chaos Meter.
  */
 export function runBot(maxSeconds: number, clicksPerSecond = 3, seed = 42): BotReport {
+  const { g, r } = newBotGame(seed);
+  for (let t = 0; t < maxSeconds; t++) {
+    if (botSecond(g, r, t, clicksPerSecond)) break;
+  }
+  return r;
+}
+
+export function newBotGame(seed: number): { g: Game; r: BotReport } {
   const g = new Game(createInitialState(seed, 0));
   g.setFlag('booted');
   const r: BotReport = { log: [], earned: { grind: 0, mogul: 0, chaos: 0 } };
   g.bus.on('token', (e) => {
     if (e.token === 'grind' || e.token === 'mogul' || e.token === 'chaos') r.earned[e.token] += e.amount;
   });
-  for (let t = 0; t < maxSeconds; t++) {
+  return { g, r };
+}
+
+/** One simulated second of the Bedroom bot. Returns true once the Garage Key is bought. */
+export function botSecond(g: Game, r: BotReport, t: number, clicksPerSecond: number): boolean {
+  {
     const newest = Object.keys(g.state.tycoons).at(-1)!;
     g.focused = newest;
     for (const rt of g.running()) {
@@ -58,9 +71,9 @@ export function runBot(maxSeconds: number, clicksPerSecond = 3, seed = 42): BotR
     simulateMayhem(g, t);
     for (const def of TYCOONS) if (g.canUnlockTycoon(def.id)) g.unlockTycoon(def.id);
     for (const id of Object.keys(g.state.tycoons)) g.setRunning(id, true);
-    const nextUnlock = TYCOONS.find((d) => !g.state.tycoons[d.id])?.unlockCost ?? 2000000;
+    const nextUnlock = TYCOONS.find((d) => !g.state.tycoons[d.id] && g.phaseOpen(d.phase))?.unlockCost ?? 2000000;
     const budget = g.state.cash.toNumber() - nextUnlock * 0.5;
-    const items = ITEMS.filter((i) => i.id !== 'garage_key' && g.canBuyItem(i.id)).sort((a, b) => g.itemCost(a.id).cmp(g.itemCost(b.id)));
+    const items = ITEMS.filter((i) => i.category !== 'key' && g.canBuyItem(i.id)).sort((a, b) => g.itemCost(a.id).cmp(g.itemCost(b.id)));
     for (const i of items) if (g.itemCost(i.id).toNumber() <= Math.max(budget, g.state.cash.toNumber() * 0.25)) g.buyItem(i.id);
     if (g.canBuyItem('garage_key')) g.buyItem('garage_key');
     for (const n of SKILL_NODES) if (g.canBuyNode(n.id) && g.buyNode(n.id)) r.firstNode ??= t;
@@ -69,11 +82,11 @@ export function runBot(maxSeconds: number, clicksPerSecond = 3, seed = 42): BotR
     r.couch ??= g.state.tycoons.couch_coin_mining ? t : undefined;
     if ((g.state.items.garage_key ?? 0) > 0) {
       r.garage = t;
-      break;
+      return true;
     }
     if (t % 300 === 0) r.log.push(`${t / 60}m tok=${JSON.stringify(g.state.tokens)} nodes=${g.state.nodes.length} cash=${g.state.cash.toFixed(0)} click=${g.stat('click.power').toFixed(1)} ex=${g.exchangeRate().toFixed(2)} ` + g.running().map((rt) => `${rt.id.slice(0, 4)}:L${rt.level} life=${rt.lifetime.toFixed(0)} up=${JSON.stringify(rt.upgrades)}`).join(' | '));
   }
-  return r;
+  return false;
 }
 
 const MAYHEM_OBJECTS = ['chair', 'monitor', 'pc', 'desk', 'cardboard_boxes#0', 'used_monitor#0', 'lava_lamp#0', 'desk_fan#0'];

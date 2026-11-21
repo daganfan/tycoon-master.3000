@@ -2,8 +2,6 @@ import type { Phase } from '@/sim/types';
 
 /** Mini-tycoons announced in the App Store but not playable yet (GDD §4). */
 export const UPCOMING: { name: string; icon: string; phase: Phase }[] = [
-  { name: 'Hot Dog Highway', icon: '🌭', phase: 'garage' },
-  { name: 'Robo Car Wash', icon: '🤖', phase: 'garage' },
   { name: 'Bee & Breakfast', icon: '🐝', phase: 'garage' },
   { name: 'Garden Gnome Empire', icon: '🧙', phase: 'garage' },
   { name: 'Yard Sale Kingpin', icon: '🏷️', phase: 'garage' },

@@ -1,7 +1,8 @@
 import { ZERO } from '@/core/num';
 import type { GameState } from './types';
+import { createGarageState } from './garage/factory';
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 export const BASE_STATS: Record<string, number> = {
   'click.power': 1,
@@ -33,6 +34,10 @@ export const BASE_STATS: Record<string, number> = {
   'cosmetic.slots': 1,
   'cosmetic.discount': 1,
   'os.tier': 0,
+  /** Factory: item value multiplier, dropper speed multiplier, Robo-Helper interval multiplier. */
+  'garage.mult': 1,
+  'garage.speed': 1,
+  'garage.robot': 1,
 };
 
 export function createInitialState(seed = Date.now() >>> 0, now = Date.now()): GameState {
@@ -54,5 +59,6 @@ export function createInitialState(seed = Date.now() >>> 0, now = Date.now()): G
     flags: [],
     settings: { comfort: 1, volume: 0.6, wallpaper: 0, reducedMotion: false, quality: 'auto' },
     layout: {},
+    garage: createGarageState(),
   };
 }

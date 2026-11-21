@@ -1,4 +1,5 @@
 import type { QuestDef } from '@/sim/types';
+import { GARAGE_QUESTS } from './garageQuests';
 
 const c = (s: { counters: Record<string, number> }, k: string): number => s.counters[k] ?? 0;
 
@@ -26,4 +27,5 @@ export const QUESTS: QuestDef[] = [
     done: (s) => s.tycoons.couch_coin_mining !== undefined },
   { id: 'q_garage', title: 'Moving out', text: 'Save up for the Garage Key.', reward: 0,
     done: (s) => (s.items.garage_key ?? 0) >= 1 },
+  ...GARAGE_QUESTS,
 ];

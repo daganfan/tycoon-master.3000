@@ -1,6 +1,7 @@
 import { num } from '@/core/num';
 import type { GameState } from './types';
 import { SAVE_VERSION, createInitialState } from './state';
+import { createGarageState } from './garage/factory';
 
 type RawSave = Record<string, unknown> & { version: number };
 
@@ -11,6 +12,13 @@ const MIGRATIONS: ((s: RawSave) => RawSave)[] = [
     const counters = { ...((s.counters as Record<string, number> | undefined) ?? {}) };
     for (const k of Object.keys(counters)) if (k.startsWith('cd_')) delete counters[k];
     return { ...s, counters, layout: {}, version: 2 };
+  },
+  // v2 → v3: the Garage (phase 2). Players who already own the key walk straight in.
+  (s) => {
+    const flags = [...((s.flags as string[] | undefined) ?? [])];
+    const items = (s.items as Record<string, number> | undefined) ?? {};
+    if ((items.garage_key ?? 0) > 0 && !flags.includes('phase:garage')) flags.push('phase:garage');
+    return { ...s, flags, garage: createGarageState(), version: 3 };
   },
 ];
 
@@ -41,6 +49,7 @@ export function deserialize(text: string): GameState {
   s.tokens = { ...base.tokens, ...s.tokens };
   s.settings = { ...base.settings, ...s.settings };
   s.layout = s.layout ?? {};
+  s.garage = { ...createGarageState(), ...s.garage, pads: [...(s.garage?.pads ?? [])] };
   s.cosmetics = { owned: s.cosmetics?.owned ?? [], equipped: s.cosmetics?.equipped ?? {} };
   return s;
 }

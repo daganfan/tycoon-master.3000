@@ -4,6 +4,7 @@ import { WEATHER_MULT, buyChance, lemonSuggested, refPrice, type LemonState } fr
 import { duckPrice, type DuckState } from '@/sim/tycoons/rubberDuckWorks';
 import { SOCK_COLORS, binCapacity, type SockState } from '@/sim/tycoons/sockSyndicate';
 import type { CouchState } from '@/sim/tycoons/couchCoinMining';
+import { GARAGE_VIEWS } from './garageViews';
 import type { TycoonOS } from '../os';
 import type { Rect, Ui } from '../ui';
 
@@ -11,6 +12,7 @@ type View = (ui: Ui, r: Rect, rt: TycoonRuntime, os: TycoonOS) => void;
 
 /** Each mini-tycoon has its own stylized 2D look, distinct from the realistic world. */
 export const VIEWS: Record<string, View> = {
+  ...GARAGE_VIEWS,
   lemon_mogul(ui, r, rt, os) {
     const s = rt.state as LemonState;
     const t = ui.time;
