@@ -62,7 +62,7 @@ export class ScreenScheduler {
       this.statT = 0;
     }
     this.pollGlow(dt);
-    this.avgMs += (dt * 1000 - this.avgMs) * 0.05;
+    this.avgMs += (dt * 1000 - this.avgMs) * 0.2;
     camera.updateMatrixWorld();
     this.pv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.pv);

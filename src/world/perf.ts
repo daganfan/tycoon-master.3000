@@ -150,7 +150,7 @@ export class AutoTuner {
 
   /** Call once per frame with the real frame interval (ms) and the GPU ms (-1 = unknown). */
   frame(intervalMs: number, gpuMs: number, hidden: boolean): void {
-    if (hidden || intervalMs > 500) {
+    if (hidden || intervalMs > 1500) {
       this.stats.clear();
       this.cooldown = Math.max(this.cooldown, 1);
       return;
@@ -162,7 +162,8 @@ export class AutoTuner {
       this.cooldown -= dt;
       return;
     }
-    if (this.stats.count < 60) return;
+    // Judge after ~1 s at 60 fps, or after 2.5 s on a very slow device.
+    if (this.stats.count < 60 && this.stats.count * this.stats.avg() < 2500) return;
     const avg = this.stats.avg(90);
     const slow = this.stats.over(this.budget * 1.6, 90);
     const overloaded = avg > this.budget * 1.12 || slow > 0.12;
