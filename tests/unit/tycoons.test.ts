@@ -249,4 +249,17 @@ describe('Skill tree keystones and stats', () => {
     for (let i = 0; i < 70; i++) g.tick(0.1);
     expect(g.state.counters.cashouts ?? 0).toBeGreaterThan(0);
   });
+
+  it('auto cash-out can be switched off per game so money can be saved up', () => {
+    const g = fresh();
+    own(g, 'b6');
+    g.toggleAutoCashout('lemon_mogul');
+    g.state.tycoons.lemon_mogul!.money = 50;
+    for (let i = 0; i < 150; i++) g.tick(0.1);
+    expect(g.state.counters.cashouts ?? 0).toBe(0);
+    expect(g.state.tycoons.lemon_mogul!.money).toBeGreaterThanOrEqual(50);
+    g.toggleAutoCashout('lemon_mogul');
+    for (let i = 0; i < 150; i++) g.tick(0.1);
+    expect(g.state.counters.cashouts ?? 0).toBeGreaterThan(0);
+  });
 });
