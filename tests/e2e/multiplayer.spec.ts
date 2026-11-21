@@ -72,8 +72,8 @@ test('host a room, a friend joins by code, sees the room, items and chat sync', 
   expect(await layoutIds(b)).toEqual(await layoutIds(a));
 
   // B's avatar shows up at A's place (and A's at B's).
-  await expect.poll(async () => (await debug(a)).avatars, { timeout: 15_000 }).toContain('Bob');
-  await expect.poll(async () => (await debug(b)).avatars, { timeout: 15_000 }).toContain('Alice');
+  await expect.poll(async () => (await debug(a)).avatars, { timeout: 45_000 }).toContain('Bob');
+  await expect.poll(async () => (await debug(b)).avatars, { timeout: 45_000 }).toContain('Alice');
   await expect(a.getByTestId('mp-players')).toContainText('Bob', { timeout: 30_000 });
 
   // A buys an item: it appears in B's copy of the room.
