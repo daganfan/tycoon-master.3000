@@ -1,14 +1,20 @@
 import { ZERO } from '@/core/num';
 import type { GameState } from './types';
 import { createGarageState } from './garage/factory';
+import { createDesk } from './desk';
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
+
+/** Starting exchange rate (internal money → Cash) before any upgrades. */
+export const BASE_EXCHANGE = 0.3;
 
 export const BASE_STATS: Record<string, number> = {
   'click.power': 1,
   'tycoon.speed': 1,
-  slots: 1,
-  'exchange.rate': 1,
+  /** Background slots: minimized games that keep running (screens/windows are separate). */
+  slots: 0,
+  /** Internal game money → Cash. Starts low; skills, gear and vibe raise it. */
+  'exchange.rate': BASE_EXCHANGE,
   vibe: 0,
   'grind.threshold': 240,
   'magnet.radius': 1.5,
@@ -60,5 +66,6 @@ export function createInitialState(seed = Date.now() >>> 0, now = Date.now()): G
     settings: { comfort: 1, volume: 0.6, wallpaper: 0, reducedMotion: false, quality: 'auto', camMode: 'third', mouseSens: 1, invertY: false, fov: 60, headBob: false },
     layout: {},
     garage: createGarageState(),
+    desk: createDesk(),
   };
 }

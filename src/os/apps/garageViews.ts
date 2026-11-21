@@ -61,8 +61,8 @@ export const GARAGE_VIEWS: Record<string, View> = {
       }
       g.restore();
       ui.emoji(ROAD_ICON[kind], cell.x + 22, cell.y + 22, 24);
-      ui.text(ROAD_INFO[kind].label, cell.x + 40, cell.y + 22, { size: 13, bold: true, color: '#fff', maxWidth: cell.w - 46 });
-      ui.text(`${tr.toFixed(1)} cars/s`, cell.x + 8, cell.y + cell.h - 12, { size: 11, color: 'rgba(255,255,255,0.8)' });
+      ui.text(ROAD_INFO[kind].label, cell.x + 40, cell.y + 22, { size: 13, bold: true, color: '#fff', maxWidth: cell.w - 46 - 24 });
+      ui.text(`${tr.toFixed(1)} cars/s`, cell.x + 8, cell.y + cell.h - 12, { size: 11, color: 'rgba(255,255,255,0.8)', maxWidth: cell.w - 70 });
       if (best.has(i)) ui.text('★', cell.x + cell.w - 14, cell.y + 20, { size: 18, bold: true, color: '#ffe066', align: 'center' });
       if (s.carts.includes(i)) {
         const bounce = Math.sin(ui.time * 6 + i) * 3;

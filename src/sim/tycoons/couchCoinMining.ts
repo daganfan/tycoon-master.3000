@@ -23,7 +23,7 @@ export const couchCoinMining = defineTycoon<CouchState>({
   icon: '🛋️',
   color: '#c0773a',
   phase: 'bedroom',
-  unlockCost: 60000,
+  unlockCost: 20000,
   currency: 'C¢',
   rate: 4,
   upgrades: [

@@ -35,7 +35,7 @@ test('boots, plays Lemon Mogul, cashes out and collects coins', async ({ page })
 
   await page.evaluate(() => {
     const { game, world } = (window as unknown as { __tm: TM }).__tm;
-    game.state.tycoons.lemon_mogul!.money += 200;
+    game.state.tycoons.lemon_mogul!.money += 800; // x0.30 starting exchange rate
     game.cashOut('lemon_mogul');
     world.setFocus(null);
   });

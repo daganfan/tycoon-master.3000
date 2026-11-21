@@ -2,6 +2,7 @@ import { num } from '@/core/num';
 import type { GameState } from './types';
 import { SAVE_VERSION, createInitialState } from './state';
 import { createGarageState } from './garage/factory';
+import { createDesk, deskFromRunning, type DeskState } from './desk';
 
 type RawSave = Record<string, unknown> & { version: number };
 
@@ -19,6 +20,16 @@ const MIGRATIONS: ((s: RawSave) => RawSave)[] = [
     const items = (s.items as Record<string, number> | undefined) ?? {};
     if ((items.garage_key ?? 0) > 0 && !flags.includes('phase:garage')) flags.push('phase:garage');
     return { ...s, flags, garage: createGarageState(), version: 3 };
+  },
+  // v3 → v4: games only run while open in a window on a screen. Games that were
+  // running in a slot are laid out one per window (main PC first), the rest minimized.
+  (s) => {
+    if (s.desk) return { ...s, version: 4 };
+    const tycoons = (s.tycoons as Record<string, { installed?: boolean }> | undefined) ?? {};
+    const running = Object.entries(tycoons).filter(([, t]) => t.installed).map(([id]) => id);
+    const items = (s.items as Record<string, number> | undefined) ?? {};
+    const perScreen = 1 + ((items.os_xp ?? 0) > 0 ? 1 : 0);
+    return { ...s, desk: deskFromRunning(running, items, perScreen), version: 4 };
   },
 ];
 
@@ -50,6 +61,8 @@ export function deserialize(text: string): GameState {
   s.settings = { ...base.settings, ...s.settings };
   s.layout = s.layout ?? {};
   s.garage = { ...createGarageState(), ...s.garage, pads: [...(s.garage?.pads ?? [])] };
+  const desk = (s.desk as DeskState | undefined) ?? createDesk();
+  s.desk = { screens: { ...desk.screens }, min: [...(desk.min ?? [])] };
   s.cosmetics = { owned: s.cosmetics?.owned ?? [], equipped: s.cosmetics?.equipped ?? {} };
   return s;
 }

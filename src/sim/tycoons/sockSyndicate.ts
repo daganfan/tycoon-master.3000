@@ -36,7 +36,7 @@ export const sockSyndicate = defineTycoon<SockState>({
   icon: '🧦',
   color: '#b06ae0',
   phase: 'bedroom',
-  unlockCost: 2500,
+  unlockCost: 1200,
   currency: 'S$',
   rate: 10,
   upgrades: [

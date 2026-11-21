@@ -71,6 +71,9 @@ export function botSecond(g: Game, r: BotReport, t: number, clicksPerSecond: num
     simulateMayhem(g, t);
     for (const def of TYCOONS) if (g.canUnlockTycoon(def.id)) g.unlockTycoon(def.id);
     for (const id of Object.keys(g.state.tycoons)) g.setRunning(id, true);
+    // A game that is bought but has no screen to run on: get another screen first.
+    if (Object.values(g.state.tycoons).some((rt) => !rt.installed))
+      for (const screen of ['used_monitor', 'refurb_pc']) if (g.canBuyItem(screen) && g.buyItem(screen)) break;
     const nextUnlock = TYCOONS.find((d) => !g.state.tycoons[d.id] && g.phaseOpen(d.phase))?.unlockCost ?? 2000000;
     const budget = g.state.cash.toNumber() - nextUnlock * 0.5;
     const items = ITEMS.filter((i) => i.category !== 'key' && g.canBuyItem(i.id)).sort((a, b) => g.itemCost(a.id).cmp(g.itemCost(b.id)));
